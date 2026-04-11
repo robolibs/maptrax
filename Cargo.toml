@@ -1,0 +1,18 @@
+[package]
+name = "maptrax"
+version = "0.0.1"
+edition = "2024"
+description = "Rust agricultural field planning library translated from farmtrax"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+concord = { path = "../concord_rs" }
+graphix = { path = "../graphix_rs" }
+geo = "0.31"
+
+[dev-dependencies]
+rerun = { version = "0.31.2", default-features = false, features = ["sdk", "server"] }
