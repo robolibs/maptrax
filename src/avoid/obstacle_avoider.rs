@@ -1,9 +1,10 @@
 use concord::Geo;
-use geo::{Point, Polygon};
+use geo::{Contains, Point, Polygon};
 
 use crate::core::{
-    Segment, point_distance, point_lerp, point_xy, polygon_aabb, polygon_from_points,
-    polygon_open_vertices, segment_end, segment_length, segment_new, segment_start, next_id, points_equal,
+    Segment, aabb_from_points, next_id, point_distance, point_lerp, point_xy, points_equal,
+    polygon_buffer, polygon_open_vertices, segment_distance_to_point, segment_end, segment_length,
+    segment_new, segment_start,
 };
 use crate::field::{Swath, SwathType, create_swath};
 
@@ -11,8 +12,10 @@ use crate::field::{Swath, SwathType, create_swath};
 pub struct ObstacleAvoider {
     obstacles: Vec<Polygon>,
     inflated_obstacles: Vec<Polygon>,
+    transit_obstacles: Vec<Polygon>,
     inflation_distance: f64,
     datum: Geo,
+    field_boundary: Option<Polygon>,
 }
 
 impl ObstacleAvoider {
@@ -20,9 +23,15 @@ impl ObstacleAvoider {
         Self {
             obstacles,
             inflated_obstacles: Vec::new(),
+            transit_obstacles: Vec::new(),
             inflation_distance: 0.0,
             datum,
+            field_boundary: None,
         }
+    }
+
+    pub fn set_field_boundary(&mut self, boundary: Polygon) {
+        self.field_boundary = Some(boundary);
     }
 
     pub fn obstacles(&self) -> &[Polygon] {
@@ -41,6 +50,10 @@ impl ObstacleAvoider {
         self.inflated_obstacles()
     }
 
+    pub fn transit_obstacles(&self) -> &[Polygon] {
+        &self.transit_obstacles
+    }
+
     pub fn datum(&self) -> Geo {
         self.datum
     }
@@ -57,11 +70,22 @@ impl ObstacleAvoider {
     }
 
     fn inflate_obstacles(&mut self) {
-        self.inflated_obstacles = self
-            .obstacles
-            .iter()
-            .filter_map(|obstacle| inflate_polygon(obstacle, self.inflation_distance))
-            .collect();
+        self.inflated_obstacles.clear();
+        self.transit_obstacles.clear();
+
+        for obstacle in &self.obstacles {
+            let Some(inflated) = inflate_polygon(obstacle, self.inflation_distance) else {
+                continue;
+            };
+            let touches_boundary = self
+                .field_boundary
+                .as_ref()
+                .is_some_and(|boundary| polygon_touches_boundary(&inflated, boundary, 1e-6));
+            self.inflated_obstacles.push(inflated.clone());
+            if !touches_boundary {
+                self.transit_obstacles.push(inflated);
+            }
+        }
     }
 
     fn process_swath(&self, swath: &Swath) -> Vec<Swath> {
@@ -97,35 +121,29 @@ impl ObstacleAvoider {
             cut_swath.width = swath.width;
             cut_swath.points = vec![start, end];
             result.push(cut_swath);
-
-            if let Some(next_segment) = current_segments.get(index + 1) {
-                let gap = point_distance(segment_end(*segment), segment_start(*next_segment));
-                if gap > 0.1 {
-                    let mut around = create_swath(
-                        segment_end(*segment),
-                        segment_start(*next_segment),
-                        SwathType::Around,
-                        "",
-                    );
-                    around.points = vec![segment_end(*segment), segment_start(*next_segment)];
-                    around.uuid = next_id("around");
-                    result.push(around);
-                }
-            }
         }
 
         result
     }
 }
 
+fn polygon_touches_boundary(polygon: &Polygon, boundary: &Polygon, tol: f64) -> bool {
+    let boundary_ring = polygon_open_vertices(boundary);
+    let obstacle_ring = polygon_open_vertices(polygon);
+    if boundary_ring.len() < 2 || obstacle_ring.is_empty() {
+        return false;
+    }
+
+    obstacle_ring.iter().any(|point| point_near_polygon_boundary(*point, boundary, tol))
+        || obstacle_ring.iter().any(|point| point_in_polygon(*point, boundary) && point_near_polygon_boundary(*point, boundary, tol))
+        || (0..boundary_ring.len()).any(|i| {
+            let edge = segment_new(boundary_ring[i], boundary_ring[(i + 1) % boundary_ring.len()]);
+            segment_intersects_polygon(edge, polygon)
+        })
+}
+
 fn inflate_polygon(polygon: &Polygon, inflation_distance: f64) -> Option<Polygon> {
-    let bb = polygon_aabb(polygon)?;
-    Some(polygon_from_points(vec![
-        point_xy(bb.min().x - inflation_distance, bb.min().y - inflation_distance),
-        point_xy(bb.max().x + inflation_distance, bb.min().y - inflation_distance),
-        point_xy(bb.max().x + inflation_distance, bb.max().y + inflation_distance),
-        point_xy(bb.min().x - inflation_distance, bb.max().y + inflation_distance),
-    ]))
+    polygon_buffer(polygon, inflation_distance.max(0.0))
 }
 
 fn segment_intersects_polygon(segment: Segment, polygon: &Polygon) -> bool {
@@ -151,7 +169,11 @@ fn difference_segment_polygon(segment: Segment, polygon: &Polygon) -> Vec<Segmen
         if (t1 - t0).abs() < 1e-9 {
             continue;
         }
-        let mid = point_lerp(segment_start(segment), segment_end(segment), (t0 + t1) * 0.5);
+        let mid = point_lerp(
+            segment_start(segment),
+            segment_end(segment),
+            (t0 + t1) * 0.5,
+        );
         if point_in_polygon(mid, polygon) {
             continue;
         }
@@ -217,28 +239,112 @@ fn segment_intersection_param(a: Segment, b: Segment) -> Option<(f64, Point)> {
 }
 
 fn point_in_polygon(point: Point, polygon: &Polygon) -> bool {
-    let ring = polygon_open_vertices(polygon);
-    if ring.len() < 3 {
-        return false;
-    }
-    let mut inside = false;
-    let mut j = ring.len() - 1;
-    for i in 0..ring.len() {
-        let pi = ring[i];
-        let pj = ring[j];
-        let intersects = ((pi.y() > point.y()) != (pj.y() > point.y()))
-            && (point.x()
-                < (pj.x() - pi.x()) * (point.y() - pi.y())
-                    / ((pj.y() - pi.y()).abs().max(1e-12))
-                    + pi.x());
-        if intersects {
-            inside = !inside;
-        }
-        j = i;
-    }
-    inside || ring.iter().any(|vertex| points_equal(*vertex, point, 1e-8))
+    polygon.contains(&point)
+        || polygon_open_vertices(polygon)
+            .iter()
+            .any(|vertex| points_equal(*vertex, point, 1e-8))
 }
 
 fn cross2(a: Point, b: Point) -> f64 {
     a.x() * b.y() - a.y() * b.x()
+}
+
+fn boundary_detour_points(polygon: &Polygon, start: Point, end: Point) -> Option<Vec<Point>> {
+    let ring = polygon_open_vertices(polygon);
+    if ring.len() < 3 {
+        return None;
+    }
+
+    let start_edge = find_boundary_edge(&ring, start)?;
+    let end_edge = find_boundary_edge(&ring, end)?;
+
+    let forward = walk_boundary(&ring, start, start_edge, end, end_edge, 1);
+    let backward = walk_boundary(&ring, start, start_edge, end, end_edge, -1);
+
+    let forward_len = polyline_length(&forward);
+    let backward_len = polyline_length(&backward);
+    Some(if forward_len <= backward_len {
+        dedup_polyline(forward)
+    } else {
+        dedup_polyline(backward)
+    })
+}
+
+fn walk_boundary(
+    ring: &[Point],
+    start: Point,
+    start_edge: usize,
+    end: Point,
+    end_edge: usize,
+    direction: isize,
+) -> Vec<Point> {
+    if start_edge == end_edge {
+        return vec![start, end];
+    }
+
+    let len = ring.len() as isize;
+    let mut points = vec![start];
+    let mut edge = start_edge as isize;
+    while edge != end_edge as isize {
+        let vertex = if direction > 0 {
+            ring[((edge + 1).rem_euclid(len)) as usize]
+        } else {
+            ring[edge.rem_euclid(len) as usize]
+        };
+        points.push(vertex);
+        edge = (edge + direction).rem_euclid(len);
+    }
+    points.push(end);
+    points
+}
+
+fn find_boundary_edge(ring: &[Point], point: Point) -> Option<usize> {
+    (0..ring.len()).find(|&i| {
+        let a = ring[i];
+        let b = ring[(i + 1) % ring.len()];
+        point_on_segment(point, a, b, 1e-5)
+    })
+}
+
+fn point_on_segment(point: Point, a: Point, b: Point, tol: f64) -> bool {
+    let seg = segment_new(a, b);
+    if segment_distance_to_point(seg, point) > tol {
+        return false;
+    }
+
+    let min_x = a.x().min(b.x()) - tol;
+    let max_x = a.x().max(b.x()) + tol;
+    let min_y = a.y().min(b.y()) - tol;
+    let max_y = a.y().max(b.y()) + tol;
+    (min_x..=max_x).contains(&point.x()) && (min_y..=max_y).contains(&point.y())
+}
+
+fn polyline_length(points: &[Point]) -> f64 {
+    points
+        .windows(2)
+        .map(|pair| point_distance(pair[0], pair[1]))
+        .sum()
+}
+
+fn dedup_polyline(mut points: Vec<Point>) -> Vec<Point> {
+    points.dedup_by(|a, b| points_equal(*a, *b, 1e-8));
+    points
+}
+
+fn polygon_boundary_distance(point: Point, polygon: &Polygon) -> f64 {
+    let ring = polygon_open_vertices(polygon);
+    if ring.is_empty() {
+        return f64::INFINITY;
+    }
+
+    let mut best = f64::INFINITY;
+    for i in 0..ring.len() {
+        let seg = segment_new(ring[i], ring[(i + 1) % ring.len()]);
+        best = best.min(segment_distance_to_point(seg, point));
+    }
+    best
+}
+
+fn point_near_polygon_boundary(point: Point, polygon: &Polygon, tol: f64) -> bool {
+    polygon_boundary_distance(point, polygon) <= tol
 }

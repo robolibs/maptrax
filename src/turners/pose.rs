@@ -8,7 +8,10 @@ pub struct Pose2D {
 
 impl Pose2D {
     pub fn new(x: f64, y: f64, yaw: f64) -> Self {
-        Self { point: Point::new(x, y), yaw }
+        Self {
+            point: Point::new(x, y),
+            yaw,
+        }
     }
 
     pub fn from_point(point: Point, yaw: f64) -> Self {

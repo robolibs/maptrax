@@ -52,15 +52,21 @@ impl Sharper {
             "three_point" => self.generate_three_point_turn(start, end),
             "bulb" => self.generate_bulb_turn(start, end, turn_angle),
             "fishtail" => self.generate_fishtail_turn(start, end, turn_angle),
-            _ => {
-                if point_distance(start.point, end.point) < self.machine_length * 0.25 {
-                    self.generate_three_point_turn(start, end)
-                } else if turn_angle.abs() > std::f64::consts::PI * 0.75 {
-                    self.generate_fishtail_turn(start, end, turn_angle)
-                } else {
-                    self.generate_bulb_turn(start, end, turn_angle)
-                }
-            }
+            _ => self.select_best_pattern(start, end, turn_angle),
+        }
+    }
+
+    fn select_best_pattern(&self, start: Pose2D, end: Pose2D, turn_angle: f64) -> SharpTurnPath {
+        let angle_deg = turn_angle.abs().to_degrees();
+        let dist = point_distance(start.point, end.point);
+        let same_point_turn = dist < 0.1 * self.machine_length;
+
+        if same_point_turn || angle_deg > 120.0 {
+            self.generate_three_point_turn(start, end)
+        } else if angle_deg > 60.0 {
+            self.generate_bulb_turn(start, end, turn_angle)
+        } else {
+            self.generate_fishtail_turn(start, end, turn_angle)
         }
     }
 
@@ -94,7 +100,7 @@ impl Sharper {
     fn generate_bulb_turn(&self, start: Pose2D, end: Pose2D, turn_angle: f64) -> SharpTurnPath {
         let mut waypoints = vec![start];
         let mut segment_types = vec!["start".to_string()];
-        let bulb_radius = self.machine_length * 0.8 + self.machine_width * 0.1;
+        let bulb_radius = self.machine_length * 0.8;
         let count = 5;
         for i in 1..=count {
             let t = i as f64 / (count + 1) as f64;

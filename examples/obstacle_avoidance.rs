@@ -11,8 +11,8 @@ fn main() {
     ]);
 
     let input = vec![create_swath(
-            Point::new(50.0, 0.0),
-            Point::new(50.0, 50.0),
+        Point::new(50.0, 0.0),
+        Point::new(50.0, 50.0),
         SwathType::Swath,
         "row_0",
     )];

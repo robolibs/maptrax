@@ -1,7 +1,10 @@
 use concord::Geo;
 use geo::{Point, Polygon};
 use maptrax::{
-    DivisionType, Maptrax, SwathType, TourBuilder, TurnPlannerConfig, polygon_from_points,
+    ConnectorMode, DecompositionMode, DivisionType, FieldGenerationMode, FieldGenerationOptions,
+    Maptrax, Nety, ObstacleAvoider, ObstaclePlanningOptions, Part, PlannerOptions, RoutingOptions,
+    RoutingStrategy, SwathAngleSearchOptions, SwathObjective, SwathType, TourBuilder,
+    TurnPlannerConfig, TurnPlannerModel, create_ring, create_swath, polygon_from_points,
 };
 
 fn test_polygon() -> Polygon {
@@ -11,6 +14,90 @@ fn test_polygon() -> Polygon {
         Point::new(100.0, 50.0),
         Point::new(0.0, 50.0),
     ])
+}
+
+fn concave_polygon() -> Polygon {
+    polygon_from_points(vec![
+        Point::new(0.0, 0.0),
+        Point::new(120.0, 0.0),
+        Point::new(120.0, 30.0),
+        Point::new(70.0, 30.0),
+        Point::new(70.0, 90.0),
+        Point::new(0.0, 90.0),
+    ])
+}
+
+fn upstream_fixture_polygon() -> Polygon {
+    polygon_from_points(vec![
+        Point::new(85.7, -209.6),
+        Point::new(201.6, -152.9),
+        Point::new(109.3, 34.4),
+        Point::new(230.0, 97.4),
+        Point::new(121.5, 170.9),
+        Point::new(-249.8, -6.7),
+        Point::new(-173.5, -153.4),
+    ])
+}
+
+fn simple_part_with_headland() -> Part {
+    let boundary_poly = test_polygon();
+    let headland_poly = polygon_from_points(vec![
+        Point::new(10.0, 10.0),
+        Point::new(90.0, 10.0),
+        Point::new(90.0, 40.0),
+        Point::new(10.0, 40.0),
+    ]);
+    Part {
+        boundary: create_ring(boundary_poly, "boundary").expect("ring"),
+        swaths: Vec::new(),
+        headlands: vec![create_ring(headland_poly, "headland").expect("ring")],
+        transit_rings: Vec::new(),
+    }
+}
+
+fn irregular_part_with_headland() -> Part {
+    let boundary = polygon_from_points(vec![
+        Point::new(0.0, 0.0),
+        Point::new(120.0, 0.0),
+        Point::new(120.0, 70.0),
+        Point::new(70.0, 90.0),
+        Point::new(0.0, 80.0),
+    ]);
+    let headland = polygon_from_points(vec![
+        Point::new(10.0, 10.0),
+        Point::new(105.0, 12.0),
+        Point::new(102.0, 58.0),
+        Point::new(62.0, 74.0),
+        Point::new(12.0, 68.0),
+    ]);
+    Part {
+        boundary: create_ring(boundary, "boundary").expect("ring"),
+        swaths: Vec::new(),
+        headlands: vec![create_ring(headland, "headland").expect("ring")],
+        transit_rings: Vec::new(),
+    }
+}
+
+fn part_with_obstacle_transit_ring() -> Part {
+    let boundary_poly = test_polygon();
+    let headland_poly = polygon_from_points(vec![
+        Point::new(10.0, 10.0),
+        Point::new(90.0, 10.0),
+        Point::new(90.0, 40.0),
+        Point::new(10.0, 40.0),
+    ]);
+    let obstacle_ring = polygon_from_points(vec![
+        Point::new(44.0, 18.0),
+        Point::new(56.0, 18.0),
+        Point::new(56.0, 32.0),
+        Point::new(44.0, 32.0),
+    ]);
+    Part {
+        boundary: create_ring(boundary_poly, "boundary").expect("ring"),
+        swaths: Vec::new(),
+        headlands: vec![create_ring(headland_poly, "headland").expect("ring")],
+        transit_rings: vec![create_ring(obstacle_ring, "obstacle").expect("ring")],
+    }
 }
 
 #[test]
@@ -77,4 +164,739 @@ fn facade_end_to_end_flow_works() {
         tour.iter()
             .any(|swath| swath.r#type == SwathType::Connection)
     );
+}
+
+#[test]
+fn staged_planning_exposes_intermediate_outputs() {
+    let mut mt = Maptrax::new();
+    mt.set_field(test_polygon(), Geo::new(51.0, 5.0, 0.0))
+        .expect("set field");
+
+    let obstacle = polygon_from_points(vec![
+        Point::new(45.0, 20.0),
+        Point::new(55.0, 20.0),
+        Point::new(55.0, 30.0),
+        Point::new(45.0, 30.0),
+    ]);
+
+    let staged = mt
+        .plan_stages(&PlannerOptions {
+            field: FieldGenerationOptions {
+                swath_width: 10.0,
+                headland_count: 1,
+                mode: FieldGenerationMode::ExplicitAngle(90.0),
+                ..FieldGenerationOptions::default()
+            },
+            obstacles: ObstaclePlanningOptions {
+                obstacles: vec![obstacle],
+                inflation_distance: 2.0,
+            },
+            ..PlannerOptions::default()
+        })
+        .expect("staged plan");
+
+    assert_eq!(staged.parts.len(), 1);
+    let part = &staged.parts[0];
+    assert_eq!(part.headlands.len(), 1);
+    assert_eq!(part.transit_rings.len(), 1);
+    assert!(!part.generated_swaths.is_empty());
+    assert!(!part.avoided_swaths.is_empty());
+    assert!(!part.ordered_swaths.is_empty());
+    assert!(!part.tour.is_empty());
+    assert!(
+        part.ordered_swaths
+            .iter()
+            .all(|swath| swath.r#type != SwathType::Connection)
+    );
+}
+
+#[test]
+fn staged_tour_replaces_graph_connections_with_turner_geometry() {
+    let mut mt = Maptrax::new();
+    mt.set_field(upstream_fixture_polygon(), Geo::new(51.0, 5.0, 0.0))
+        .expect("set field");
+
+    let obstacle = polygon_from_points(vec![
+        Point::new(-15.0, -15.0),
+        Point::new(15.0, -15.0),
+        Point::new(15.0, 15.0),
+        Point::new(-15.0, 15.0),
+    ]);
+
+    let staged = mt
+        .plan_stages(&PlannerOptions {
+            field: FieldGenerationOptions {
+                swath_width: 8.0,
+                headland_count: 2,
+                mode: FieldGenerationMode::ExplicitAngle(0.0),
+                ..FieldGenerationOptions::default()
+            },
+            routing: RoutingOptions {
+                strategy: RoutingStrategy::GreedyNearest,
+                local_improvement_passes: 1,
+            },
+            obstacles: ObstaclePlanningOptions {
+                obstacles: vec![obstacle],
+                inflation_distance: 2.0,
+            },
+            turn: TurnPlannerConfig {
+                model: TurnPlannerModel::Sharper,
+                connector_mode: ConnectorMode::Headland,
+                swath_width: 4.0,
+                min_turning_radius: 2.0,
+                machine_length: 6.0,
+                machine_width: 3.0,
+                ..TurnPlannerConfig::default()
+            },
+            ..PlannerOptions::default()
+        })
+        .expect("staged");
+
+    let part = &staged.parts[0];
+    assert!(
+        part.ordered_swaths
+            .iter()
+            .all(|swath| swath.r#type == SwathType::Swath)
+    );
+    let turner_segments = part
+        .tour
+        .iter()
+        .filter(|swath| swath.r#type == SwathType::Connection)
+        .collect::<Vec<_>>();
+    assert!(!turner_segments.is_empty());
+    assert!(
+        turner_segments
+            .iter()
+            .any(|swath| swath.points.len() > 2),
+        "tour still contains only straight placeholder connectors"
+    );
+    assert!(part.tour.len() > part.ordered_swaths.len());
+}
+
+#[test]
+fn staged_and_one_shot_facade_outputs_match() {
+    let mut staged_mt = Maptrax::new();
+    staged_mt
+        .set_field(upstream_fixture_polygon(), Geo::new(51.0, 5.0, 0.0))
+        .expect("field");
+    let options = PlannerOptions {
+        field: FieldGenerationOptions {
+            swath_width: 4.0,
+            headland_count: 3,
+            mode: FieldGenerationMode::ExplicitAngle(0.0),
+            ..FieldGenerationOptions::default()
+        },
+        routing: RoutingOptions {
+            strategy: RoutingStrategy::GreedyNearest,
+            ..RoutingOptions::default()
+        },
+        turn: TurnPlannerConfig::default(),
+        ..PlannerOptions::default()
+    };
+
+    let staged = staged_mt.plan_stages(&options).expect("staged");
+
+    let mut one_shot_mt = Maptrax::new();
+    one_shot_mt
+        .set_field(upstream_fixture_polygon(), Geo::new(51.0, 5.0, 0.0))
+        .expect("field");
+    let one_shot = one_shot_mt.plan_all(&options).expect("one shot");
+
+    assert_eq!(staged.parts.len(), one_shot.parts.len());
+    for (staged_part, one_shot_part) in staged.parts.iter().zip(one_shot.parts.iter()) {
+        assert_eq!(staged_part.part_index, one_shot_part.part_index);
+        assert_eq!(
+            staged_part.ordered_swaths.len(),
+            one_shot_part.ordered_swaths.len()
+        );
+        assert_eq!(staged_part.tour.len(), one_shot_part.tour.len());
+        assert_eq!(
+            staged_part
+                .ordered_swaths
+                .iter()
+                .filter(|swath| swath.r#type == SwathType::Swath)
+                .count(),
+            one_shot_part
+                .ordered_swaths
+                .iter()
+                .filter(|swath| swath.r#type == SwathType::Swath)
+                .count()
+        );
+        assert_eq!(
+            staged_part
+                .tour
+                .iter()
+                .filter(|swath| swath.r#type == SwathType::Connection)
+                .count(),
+            one_shot_part
+                .tour
+                .iter()
+                .filter(|swath| swath.r#type == SwathType::Connection)
+                .count()
+        );
+    }
+}
+
+#[test]
+fn facade_supports_objective_driven_field_generation() {
+    let mut mt = Maptrax::new();
+    mt.set_field(test_polygon(), Geo::new(51.0, 5.0, 0.0))
+        .expect("set field");
+
+    let result = mt
+        .generate_field_with_objective(
+            10.0,
+            SwathObjective::ApproxMinSwathCount,
+            SwathAngleSearchOptions {
+                start_degrees: 0.0,
+                end_degrees: 180.0,
+                step_degrees: 90.0,
+            },
+            1,
+        )
+        .expect("objective field");
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].angle_degrees, 0.0);
+    assert_eq!(mt.field().unwrap().get_parts()[0].headlands.len(), 1);
+    assert_eq!(mt.field().unwrap().get_parts()[0].swaths.len(), 3);
+}
+
+#[test]
+fn decomposed_parts_can_be_routed_and_toured() {
+    let mut mt = Maptrax::new();
+    mt.set_field(concave_polygon(), Geo::new(51.0, 5.0, 0.0))
+        .expect("set field");
+    assert_eq!(
+        mt.decompose_field(DecompositionMode::ConcaveSplit)
+            .expect("decompose"),
+        2
+    );
+
+    mt.generate_field(10.0, 90.0, 0).expect("generate");
+    let field = mt.field().expect("field");
+    assert_eq!(field.get_parts().len(), 2);
+
+    let cfg = TurnPlannerConfig {
+        swath_width: 10.0,
+        min_turning_radius: 2.0,
+        step_size: 0.2,
+        headland_threshold_rows: 2.0,
+        ..TurnPlannerConfig::default()
+    };
+
+    for part in field.get_parts() {
+        assert!(!part.swaths.is_empty());
+        let mut nety = Nety::new(&part.swaths);
+        nety.field_traversal(None);
+        let ordered = nety.get_swaths().to_vec();
+        let tour = TourBuilder::build(part, &ordered, &cfg);
+        assert!(!tour.is_empty());
+        assert!(
+            tour.iter()
+                .any(|swath| matches!(swath.r#type, SwathType::Swath | SwathType::Connection))
+        );
+    }
+}
+
+#[test]
+fn direct_turn_is_preferred_for_close_swaths() {
+    let part = simple_part_with_headland();
+    let mut from = create_swath(
+        Point::new(20.0, 10.0),
+        Point::new(20.0, 40.0),
+        SwathType::Swath,
+        "a",
+    );
+    from.width = 10.0;
+    let mut to = create_swath(
+        Point::new(30.0, 40.0),
+        Point::new(30.0, 10.0),
+        SwathType::Swath,
+        "b",
+    );
+    to.width = 10.0;
+    to.swap_direction();
+
+    let tour = TourBuilder::build(
+        &part,
+        &[from, to],
+        &TurnPlannerConfig {
+            swath_width: 10.0,
+            min_turning_radius: 25.0,
+            headland_threshold_rows: 2.0,
+            ..TurnPlannerConfig::default()
+        },
+    );
+
+    let connections = tour
+        .iter()
+        .filter(|swath| swath.r#type == SwathType::Connection)
+        .collect::<Vec<_>>();
+    assert_eq!(connections.len(), 1);
+    assert!(connections[0].points.len() >= 2);
+}
+
+#[test]
+fn headland_route_is_preferred_for_far_swaths() {
+    let part = simple_part_with_headland();
+    let mut from = create_swath(
+        Point::new(20.0, 10.0),
+        Point::new(20.0, 40.0),
+        SwathType::Swath,
+        "a",
+    );
+    from.width = 10.0;
+    let to = create_swath(
+        Point::new(80.0, 10.0),
+        Point::new(80.0, 40.0),
+        SwathType::Swath,
+        "b",
+    );
+
+    let tour = TourBuilder::build(
+        &part,
+        &[from, to],
+        &TurnPlannerConfig {
+            connector_mode: ConnectorMode::Headland,
+            swath_width: 10.0,
+            headland_threshold_rows: 2.0,
+            ..TurnPlannerConfig::default()
+        },
+    );
+
+    let connections = tour
+        .iter()
+        .filter(|swath| swath.r#type == SwathType::Connection)
+        .collect::<Vec<_>>();
+    assert!(!connections.is_empty());
+    assert!(connections.len() >= 2 || connections.iter().any(|swath| swath.points.len() > 2));
+    assert!(connections.iter().any(|swath| swath.points.len() > 2));
+}
+
+#[test]
+fn forced_headland_mode_always_uses_headland_route_when_available() {
+    let part = simple_part_with_headland();
+    let mut from = create_swath(
+        Point::new(20.0, 10.0),
+        Point::new(20.0, 40.0),
+        SwathType::Swath,
+        "a",
+    );
+    from.width = 10.0;
+    let to = create_swath(
+        Point::new(80.0, 10.0),
+        Point::new(80.0, 40.0),
+        SwathType::Swath,
+        "b",
+    );
+
+    let tour = TourBuilder::build(
+        &part,
+        &[from, to],
+        &TurnPlannerConfig {
+            connector_mode: ConnectorMode::Headland,
+            model: TurnPlannerModel::Sharper,
+            swath_width: 10.0,
+            min_turning_radius: 2.0,
+            machine_length: 6.0,
+            machine_width: 3.0,
+            ..TurnPlannerConfig::default()
+        },
+    );
+
+    let headland_like = tour
+        .iter()
+        .filter(|swath| swath.r#type == SwathType::Connection)
+        .filter(|swath| swath.points.len() > 2)
+        .count();
+    assert!(headland_like >= 1);
+}
+
+#[test]
+fn irregular_headland_ring_routing_uses_polyline_path() {
+    let part = irregular_part_with_headland();
+    let mut from = create_swath(
+        Point::new(20.0, 12.0),
+        Point::new(20.0, 60.0),
+        SwathType::Swath,
+        "a",
+    );
+    from.width = 8.0;
+    let to = create_swath(
+        Point::new(92.0, 16.0),
+        Point::new(92.0, 55.0),
+        SwathType::Swath,
+        "b",
+    );
+
+    let tour = TourBuilder::build(
+        &part,
+        &[from, to],
+        &TurnPlannerConfig {
+            swath_width: 8.0,
+            headland_threshold_rows: 2.0,
+            ..TurnPlannerConfig::default()
+        },
+    );
+
+    let ring_like = tour
+        .iter()
+        .filter(|swath| swath.r#type == SwathType::Connection && swath.points.len() > 2)
+        .collect::<Vec<_>>();
+    assert!(!ring_like.is_empty());
+    assert!(
+        ring_like
+            .iter()
+            .any(|swath| swath.bounding_box.max().x > swath.bounding_box.min().x)
+    );
+}
+
+#[test]
+fn obstacle_transit_ring_is_preferred_over_field_headland_when_closer() {
+    let part = part_with_obstacle_transit_ring();
+    let mut from = create_swath(
+        Point::new(40.0, 0.0),
+        Point::new(40.0, 50.0),
+        SwathType::Swath,
+        "a",
+    );
+    from.width = 8.0;
+    let to = create_swath(
+        Point::new(60.0, 0.0),
+        Point::new(60.0, 50.0),
+        SwathType::Swath,
+        "b",
+    );
+
+    let tour = TourBuilder::build(
+        &part,
+        &[from, to],
+        &TurnPlannerConfig {
+            connector_mode: ConnectorMode::Headland,
+            model: TurnPlannerModel::ReedsShepp,
+            swath_width: 8.0,
+            min_turning_radius: 2.0,
+            ..TurnPlannerConfig::default()
+        },
+    );
+
+    let transit = tour
+        .iter()
+        .filter(|swath| swath.r#type == SwathType::Connection && swath.points.len() > 2)
+        .collect::<Vec<_>>();
+    assert!(!transit.is_empty());
+    assert!(
+        transit.iter().any(|swath| {
+            swath.points.iter().any(|point| {
+                (44.0..=56.0).contains(&point.x()) && (18.0..=32.0).contains(&point.y())
+            })
+        }),
+        "expected connector to route around obstacle-local transit ring"
+    );
+}
+
+#[test]
+fn obstacle_transit_ring_is_not_used_for_unrelated_row_transition() {
+    let part = part_with_obstacle_transit_ring();
+    let mut from = create_swath(
+        Point::new(15.0, 0.0),
+        Point::new(15.0, 50.0),
+        SwathType::Swath,
+        "a",
+    );
+    from.width = 8.0;
+    let to = create_swath(
+        Point::new(25.0, 0.0),
+        Point::new(25.0, 50.0),
+        SwathType::Swath,
+        "b",
+    );
+
+    let tour = TourBuilder::build(
+        &part,
+        &[from, to],
+        &TurnPlannerConfig {
+            connector_mode: ConnectorMode::Headland,
+            model: TurnPlannerModel::ReedsShepp,
+            swath_width: 8.0,
+            min_turning_radius: 2.0,
+            ..TurnPlannerConfig::default()
+        },
+    );
+
+    let transit = tour
+        .iter()
+        .filter(|swath| swath.r#type == SwathType::Connection && swath.points.len() > 2)
+        .collect::<Vec<_>>();
+    assert!(!transit.is_empty());
+    assert!(
+        transit.iter().all(|swath| {
+            swath.points.iter().all(|point| {
+                !((44.0..=56.0).contains(&point.x()) && (18.0..=32.0).contains(&point.y()))
+            })
+        }),
+        "unrelated row change still routed through obstacle transit ring"
+    );
+}
+
+#[test]
+fn auto_mode_keeps_close_row_transition_local() {
+    let part = part_with_obstacle_transit_ring();
+    let mut from = create_swath(
+        Point::new(15.0, 0.0),
+        Point::new(15.0, 50.0),
+        SwathType::Swath,
+        "a",
+    );
+    from.width = 8.0;
+    let to = create_swath(
+        Point::new(25.0, 0.0),
+        Point::new(25.0, 50.0),
+        SwathType::Swath,
+        "b",
+    );
+
+    let tour = TourBuilder::build(
+        &part,
+        &[from, to],
+        &TurnPlannerConfig {
+            connector_mode: ConnectorMode::Auto,
+            model: TurnPlannerModel::ReedsShepp,
+            swath_width: 8.0,
+            min_turning_radius: 2.0,
+            ..TurnPlannerConfig::default()
+        },
+    );
+
+    let connections = tour
+        .iter()
+        .filter(|swath| swath.r#type == SwathType::Connection)
+        .collect::<Vec<_>>();
+    assert_eq!(connections.len(), 1);
+    assert!(
+        connections[0].points.iter().all(|point| {
+            !((44.0..=56.0).contains(&point.x()) && (18.0..=32.0).contains(&point.y()))
+        }),
+        "close-row auto connector still detoured through the obstacle transit ring"
+    );
+}
+
+#[test]
+fn tiny_headland_entry_exit_hops_do_not_create_triangle_loops() {
+    let part = simple_part_with_headland();
+    let mut from = create_swath(
+        Point::new(20.0, 10.0),
+        Point::new(20.0, 40.0),
+        SwathType::Swath,
+        "a",
+    );
+    from.width = 10.0;
+    let mut to = create_swath(
+        Point::new(22.0, 40.0),
+        Point::new(22.0, 10.0),
+        SwathType::Swath,
+        "b",
+    );
+    to.width = 10.0;
+
+    let tour = TourBuilder::build(
+        &part,
+        &[from, to],
+        &TurnPlannerConfig {
+            model: TurnPlannerModel::Sharper,
+            swath_width: 10.0,
+            min_turning_radius: 2.0,
+            machine_length: 6.0,
+            machine_width: 3.0,
+            headland_threshold_rows: 0.0,
+            ..TurnPlannerConfig::default()
+        },
+    );
+
+    let short_connections = tour
+        .iter()
+        .filter(|swath| swath.r#type == SwathType::Connection)
+        .filter(|swath| {
+            let dx = swath.tail().x() - swath.head().x();
+            let dy = swath.tail().y() - swath.head().y();
+            (dx * dx + dy * dy).sqrt() <= 3.0
+        })
+        .collect::<Vec<_>>();
+
+    assert!(!short_connections.is_empty());
+    assert!(
+        short_connections
+            .iter()
+            .all(|swath| swath.points.len() == 2)
+    );
+}
+
+#[test]
+fn obstacle_affected_planning_remains_valid() {
+    let part = simple_part_with_headland();
+    let mut swaths = vec![
+        create_swath(
+            Point::new(40.0, 10.0),
+            Point::new(40.0, 40.0),
+            SwathType::Swath,
+            "a",
+        ),
+        create_swath(
+            Point::new(60.0, 10.0),
+            Point::new(60.0, 40.0),
+            SwathType::Swath,
+            "b",
+        ),
+    ];
+    swaths[0].width = 10.0;
+    swaths[1].width = 10.0;
+
+    let obstacle = polygon_from_points(vec![
+        Point::new(47.0, 18.0),
+        Point::new(53.0, 18.0),
+        Point::new(53.0, 32.0),
+        Point::new(47.0, 32.0),
+    ]);
+    let mut avoider = ObstacleAvoider::new(vec![obstacle], Geo::new(51.0, 5.0, 0.0));
+    let avoided = avoider.avoid(&swaths, 2.0);
+
+    let ordered = avoided
+        .into_iter()
+        .filter(|swath| matches!(swath.r#type, SwathType::Swath | SwathType::Around))
+        .collect::<Vec<_>>();
+    let tour = TourBuilder::build(
+        &part,
+        &ordered,
+        &TurnPlannerConfig {
+            swath_width: 10.0,
+            headland_threshold_rows: 2.0,
+            ..TurnPlannerConfig::default()
+        },
+    );
+    assert!(!tour.is_empty());
+    assert!(
+        tour.iter()
+            .any(|swath| swath.r#type == SwathType::Connection)
+    );
+}
+
+#[test]
+fn planner_options_drive_end_to_end_facade_flow() {
+    let mut mt = Maptrax::new();
+    mt.set_field(test_polygon(), Geo::new(51.0, 5.0, 0.0))
+        .expect("set field");
+
+    let planned = mt
+        .plan_all(&PlannerOptions {
+            field: FieldGenerationOptions {
+                swath_width: 10.0,
+                headland_count: 1,
+                mode: FieldGenerationMode::ExplicitAngle(90.0),
+                ..FieldGenerationOptions::default()
+            },
+            routing: RoutingOptions {
+                strategy: RoutingStrategy::Snake,
+                local_improvement_passes: 1,
+            },
+            turn: TurnPlannerConfig {
+                swath_width: 10.0,
+                ..TurnPlannerConfig::default()
+            },
+            ..PlannerOptions::default()
+        })
+        .expect("plan");
+
+    assert_eq!(planned.parts.len(), 1);
+    assert!(!planned.parts[0].ordered_swaths.is_empty());
+    assert!(planned.parts[0].tour.len() >= planned.parts[0].ordered_swaths.len());
+}
+
+#[test]
+fn planner_options_work_on_upstream_shaped_fixture() {
+    let mut mt = Maptrax::new();
+    mt.set_field(
+        upstream_fixture_polygon(),
+        Geo::new(51.98954034749562, 5.6584737410504715, 53.801823),
+    )
+    .expect("set field");
+
+    let planned = mt
+        .plan_all(&PlannerOptions {
+            field: FieldGenerationOptions {
+                swath_width: 4.0,
+                headland_count: 3,
+                mode: FieldGenerationMode::Objective {
+                    objective: SwathObjective::ApproxMinSwathCount,
+                    options: SwathAngleSearchOptions::default(),
+                },
+                ..FieldGenerationOptions::default()
+            },
+            routing: RoutingOptions {
+                strategy: RoutingStrategy::GreedyNearest,
+                local_improvement_passes: 0,
+            },
+            turn: TurnPlannerConfig {
+                swath_width: 4.0,
+                min_turning_radius: 2.0,
+                ..TurnPlannerConfig::default()
+            },
+            obstacles: ObstaclePlanningOptions {
+                obstacles: vec![polygon_from_points(vec![
+                    Point::new(-20.0, -10.0),
+                    Point::new(20.0, -10.0),
+                    Point::new(20.0, 20.0),
+                    Point::new(-20.0, 20.0),
+                ])],
+                inflation_distance: 2.0,
+            },
+            ..PlannerOptions::default()
+        })
+        .expect("plan");
+
+    assert_eq!(planned.parts.len(), 1);
+    assert!(!planned.objective_results.is_empty());
+    assert!(!planned.parts[0].tour.is_empty());
+}
+
+#[test]
+fn facade_strategy_selection_changes_ordered_swaths() {
+    let mut mt = Maptrax::new();
+    mt.set_field(test_polygon(), Geo::new(51.0, 5.0, 0.0))
+        .expect("set field");
+    mt.generate_field(10.0, 90.0, 0).expect("generate");
+
+    let snake = mt
+        .plan_ordered_swaths_for_part(
+            0,
+            RoutingOptions {
+                strategy: RoutingStrategy::Snake,
+                local_improvement_passes: 0,
+            },
+            &ObstaclePlanningOptions::default(),
+        )
+        .expect("snake");
+    let spiral = mt
+        .plan_ordered_swaths_for_part(
+            0,
+            RoutingOptions {
+                strategy: RoutingStrategy::Spiral,
+                local_improvement_passes: 0,
+            },
+            &ObstaclePlanningOptions::default(),
+        )
+        .expect("spiral");
+
+    let snake_ids = snake
+        .iter()
+        .filter(|swath| swath.r#type == SwathType::Swath)
+        .map(|swath| swath.uuid.clone())
+        .collect::<Vec<_>>();
+    let spiral_ids = spiral
+        .iter()
+        .filter(|swath| swath.r#type == SwathType::Swath)
+        .map(|swath| swath.uuid.clone())
+        .collect::<Vec<_>>();
+
+    assert_ne!(snake_ids, spiral_ids);
 }

@@ -1,4 +1,4 @@
-use crate::core::{MaptraxError, aabb_center, segment_length, point_distance};
+use crate::core::{MaptraxError, aabb_center, point_distance, segment_length};
 use crate::field::{Field, Part, Ring, Swath, SwathType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,7 +181,10 @@ impl Divy {
                             .enumerate()
                             .min_by(|(_, a), (_, b)| {
                                 point_distance(center, aabb_center(a.bounding_box))
-                                    .partial_cmp(&point_distance(center, aabb_center(b.bounding_box)))
+                                    .partial_cmp(&point_distance(
+                                        center,
+                                        aabb_center(b.bounding_box),
+                                    ))
                                     .unwrap_or(std::cmp::Ordering::Equal)
                             })
                             .map(|(index, _)| index)

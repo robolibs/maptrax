@@ -16,10 +16,18 @@ pub use core::{
     remove_colinear_points, segment_length,
 };
 pub use division::{DivisionResult, DivisionType, Divy};
-pub use facade::Maptrax;
-pub use field::{Field, Part, Ring, Swath, SwathType, create_ring, create_swath};
-pub use net::{ABLine, Nety};
-pub use tour::{TourBuilder, TurnPlannerConfig, TurnPlannerModel};
+pub use facade::{
+    FieldGenerationMode, FieldGenerationOptions, MachinePlannedPart, MachinePlanningOptions,
+    Maptrax, ObstaclePlanningOptions, PlannedField, PlannedFieldStages, PlannedMachines,
+    PlannedPart, PlannedPartStages, PlannerOptions,
+};
+pub use field::{
+    DecompositionMode, Field, Part, Ring, Swath, SwathAngleSearchOptions, SwathAngleSearchResult,
+    SwathObjective, SwathType, create_ring, create_swath, generate_headlands_for_polygon,
+    generate_swaths_for_polygon,
+};
+pub use net::{ABLine, Nety, RoutingOptions, RoutingStrategy};
+pub use tour::{ConnectorMode, TourBuilder, TurnPlannerConfig, TurnPlannerModel};
 pub use turners::{
     Dubins, DubinsPath, DubinsSegment, DubinsSegmentType, Pose2D, ReedsShepp, ReedsSheppPath,
     ReedsSheppSegment, ReedsSheppSegmentType, SharpTurnPath, Sharper,

@@ -7,7 +7,7 @@ use graphix::vertex::{
     num_vertices,
 };
 
-use crate::core::{point_distance, segment_end, segment_length, segment_start};
+use crate::core::{aabb_from_points, point_distance, segment_end, segment_length, segment_start};
 use crate::field::{Swath, SwathType};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +43,28 @@ pub struct Nety {
     swaths: Vec<Swath>,
     graph: Graph<Point, ()>,
     vertices: Vec<(VertexId<Point>, VertexId<Point>)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutingStrategy {
+    GreedyNearest,
+    Snake,
+    Spiral,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoutingOptions {
+    pub strategy: RoutingStrategy,
+    pub local_improvement_passes: usize,
+}
+
+impl Default for RoutingOptions {
+    fn default() -> Self {
+        Self {
+            strategy: RoutingStrategy::GreedyNearest,
+            local_improvement_passes: 0,
+        }
+    }
 }
 
 impl Nety {
@@ -132,61 +154,21 @@ impl Nety {
     }
 
     pub fn field_traversal(&mut self, start_point: Option<Point>) {
+        self.field_traversal_with_options(start_point, RoutingOptions::default());
+    }
+
+    pub fn field_traversal_with_options(
+        &mut self,
+        start_point: Option<Point>,
+        options: RoutingOptions,
+    ) {
         if self.swaths.is_empty() {
             return;
         }
 
         let start_point = start_point.unwrap_or(segment_start(self.swaths[0].line));
-        let mut remaining: HashSet<usize> = (0..self.swaths.len()).collect();
-        let mut traversal = Vec::with_capacity(self.swaths.len());
-        let mut current_point = start_point;
-
-        while !remaining.is_empty() {
-            let (index, start_from_head) = remaining
-                .iter()
-                .copied()
-                .map(|index| {
-                    let swath = &self.swaths[index];
-                    let head_dist = point_distance(current_point, swath.head());
-                    let tail_dist = point_distance(current_point, swath.tail());
-                    if head_dist <= tail_dist {
-                        (index, true, head_dist)
-                    } else {
-                        (index, false, tail_dist)
-                    }
-                })
-                .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|(index, start_from_head, _)| (index, start_from_head))
-                .unwrap();
-
-            remaining.remove(&index);
-            let mut swath = self.swaths[index].clone();
-            if !start_from_head {
-                swath.swap_direction();
-            }
-            current_point = swath.tail();
-            traversal.push(swath);
-        }
-
-        let mut ordered = Vec::with_capacity(traversal.len().saturating_mul(2));
-        for (index, swath) in traversal.iter().cloned().enumerate() {
-            ordered.push(swath.clone());
-            if let Some(next) = traversal.get(index + 1) {
-                let connection = Swath {
-                    line: geo::Line::new(swath.tail().0, next.head().0),
-                    uuid: format!("connection_{}_{}", swath.uuid, next.uuid),
-                    r#type: SwathType::Connection,
-                    finished: false,
-                    bounding_box: crate::core::aabb_from_points(&[swath.tail(), next.head()]),
-                    id: -1,
-                    width: 0.0,
-                    points: vec![swath.tail(), next.head()],
-                };
-                ordered.push(connection);
-            }
-        }
-
-        self.swaths = ordered;
+        let traversal = self.plan_traversal(start_point, options);
+        self.swaths = build_connection_augmented_order(traversal);
     }
 
     pub fn shortest_path(&mut self, start: Option<Point>, goal: Option<Point>) {
@@ -280,4 +262,250 @@ impl Nety {
             })
     }
 
+    fn plan_traversal(&self, start_point: Point, options: RoutingOptions) -> Vec<Swath> {
+        let mut traversal = match options.strategy {
+            RoutingStrategy::GreedyNearest => self.greedy_nearest_order(start_point),
+            RoutingStrategy::Snake => self.pattern_order(start_point, RoutingStrategy::Snake),
+            RoutingStrategy::Spiral => self.pattern_order(start_point, RoutingStrategy::Spiral),
+        };
+
+        if options.local_improvement_passes > 0 && traversal.len() >= 3 {
+            traversal =
+                improve_adjacent_swaps(traversal, start_point, options.local_improvement_passes);
+        }
+
+        traversal
+    }
+
+    fn greedy_nearest_order(&self, start_point: Point) -> Vec<Swath> {
+        let mut remaining: HashSet<usize> = (0..self.swaths.len()).collect();
+        let mut traversal = Vec::with_capacity(self.swaths.len());
+        let mut current_point = start_point;
+
+        while !remaining.is_empty() {
+            let (index, start_from_head) = remaining
+                .iter()
+                .copied()
+                .map(|index| {
+                    let swath = &self.swaths[index];
+                    let head_dist = point_distance(current_point, swath.head());
+                    let tail_dist = point_distance(current_point, swath.tail());
+                    if head_dist <= tail_dist {
+                        (index, true, head_dist)
+                    } else {
+                        (index, false, tail_dist)
+                    }
+                })
+                .min_by(|a, b| {
+                    a.2.partial_cmp(&b.2)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a.0.cmp(&b.0))
+                })
+                .map(|(index, start_from_head, _)| (index, start_from_head))
+                .unwrap();
+
+            remaining.remove(&index);
+            let mut swath = self.swaths[index].clone();
+            if !start_from_head {
+                swath.swap_direction();
+            }
+            current_point = swath.tail();
+            traversal.push(swath);
+        }
+
+        traversal
+    }
+
+    fn pattern_order(&self, start_point: Point, strategy: RoutingStrategy) -> Vec<Swath> {
+        let tangent = dominant_tangent(&self.swaths);
+        let normal = (-tangent.1, tangent.0);
+        let mut indexed = self
+            .swaths
+            .iter()
+            .enumerate()
+            .map(|(index, swath)| {
+                let center = Point::new(
+                    (swath.head().x() + swath.tail().x()) * 0.5,
+                    (swath.head().y() + swath.tail().y()) * 0.5,
+                );
+                let lateral = center.x() * normal.0 + center.y() * normal.1;
+                let along = center.x() * tangent.0 + center.y() * tangent.1;
+                (index, lateral, along)
+            })
+            .collect::<Vec<_>>();
+        indexed.sort_by(|a, b| {
+            a.1.partial_cmp(&b.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+
+        let ordered_indices = match strategy {
+            RoutingStrategy::Snake => snake_indices(indexed.iter().map(|item| item.0).collect()),
+            RoutingStrategy::Spiral => spiral_indices(
+                indexed.iter().map(|item| item.0).collect(),
+                start_point,
+                &self.swaths,
+            ),
+            RoutingStrategy::GreedyNearest => unreachable!(),
+        };
+
+        let mut traversal = ordered_indices
+            .into_iter()
+            .enumerate()
+            .map(|(order_index, swath_index)| {
+                let mut swath = self.swaths[swath_index].clone();
+                let positive = order_index % 2 == 0;
+                if direction_dot(&swath, tangent) < 0.0 && positive {
+                    swath.swap_direction();
+                } else if direction_dot(&swath, tangent) > 0.0 && !positive {
+                    swath.swap_direction();
+                }
+                swath
+            })
+            .collect::<Vec<_>>();
+
+        maybe_reverse_for_start(&mut traversal, start_point);
+        traversal
+    }
+}
+
+fn build_connection_augmented_order(traversal: Vec<Swath>) -> Vec<Swath> {
+    let mut ordered = Vec::with_capacity(traversal.len().saturating_mul(2));
+    for (index, swath) in traversal.iter().cloned().enumerate() {
+        ordered.push(swath.clone());
+        if let Some(next) = traversal.get(index + 1) {
+            let connection = Swath {
+                line: geo::Line::new(swath.tail().0, next.head().0),
+                uuid: format!("connection_{}_{}", swath.uuid, next.uuid),
+                r#type: SwathType::Connection,
+                finished: false,
+                bounding_box: aabb_from_points(&[swath.tail(), next.head()]),
+                id: -1,
+                width: 0.0,
+                points: vec![swath.tail(), next.head()],
+            };
+            ordered.push(connection);
+        }
+    }
+    ordered
+}
+
+fn dominant_tangent(swaths: &[Swath]) -> (f64, f64) {
+    let mut tx = 0.0;
+    let mut ty = 0.0;
+    for swath in swaths {
+        tx += swath.tail().x() - swath.head().x();
+        ty += swath.tail().y() - swath.head().y();
+    }
+    let len = (tx * tx + ty * ty).sqrt();
+    if len < 1e-9 {
+        (1.0, 0.0)
+    } else {
+        (tx / len, ty / len)
+    }
+}
+
+fn direction_dot(swath: &Swath, tangent: (f64, f64)) -> f64 {
+    (swath.tail().x() - swath.head().x()) * tangent.0
+        + (swath.tail().y() - swath.head().y()) * tangent.1
+}
+
+fn snake_indices(indices: Vec<usize>) -> Vec<usize> {
+    indices
+}
+
+fn spiral_indices(indices: Vec<usize>, start_point: Point, swaths: &[Swath]) -> Vec<usize> {
+    if indices.is_empty() {
+        return Vec::new();
+    }
+
+    let left_dist = endpoint_distance_to_swath(start_point, &swaths[indices[0]]);
+    let right_dist = endpoint_distance_to_swath(start_point, &swaths[*indices.last().unwrap()]);
+    let mut left = 0usize;
+    let mut right = indices.len() - 1;
+    let mut take_left = left_dist <= right_dist;
+    let mut out = Vec::with_capacity(indices.len());
+
+    while left <= right {
+        if take_left {
+            out.push(indices[left]);
+            left += 1;
+        } else {
+            out.push(indices[right]);
+            if right == 0 {
+                break;
+            }
+            right -= 1;
+        }
+        take_left = !take_left;
+    }
+
+    out
+}
+
+fn endpoint_distance_to_swath(point: Point, swath: &Swath) -> f64 {
+    point_distance(point, swath.head()).min(point_distance(point, swath.tail()))
+}
+
+fn maybe_reverse_for_start(traversal: &mut [Swath], start_point: Point) {
+    if traversal.len() < 2 {
+        return;
+    }
+    let first_dist = endpoint_distance_to_swath(start_point, &traversal[0]);
+    let last_dist = endpoint_distance_to_swath(start_point, traversal.last().unwrap());
+    if last_dist + 1e-9 < first_dist {
+        traversal.reverse();
+        for swath in traversal.iter_mut() {
+            swath.swap_direction();
+        }
+    }
+}
+
+fn improve_adjacent_swaps(
+    mut traversal: Vec<Swath>,
+    start_point: Point,
+    passes: usize,
+) -> Vec<Swath> {
+    for _ in 0..passes {
+        let mut changed = false;
+        for i in 0..traversal.len().saturating_sub(1) {
+            let current_score = deadhead_distance(start_point, &traversal);
+            let mut candidate = traversal.clone();
+            candidate.swap(i, i + 1);
+            orient_greedily_in_place(start_point, &mut candidate);
+            let candidate_score = deadhead_distance(start_point, &candidate);
+            if candidate_score + 1e-9 < current_score {
+                traversal = candidate;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    traversal
+}
+
+fn orient_greedily_in_place(start_point: Point, traversal: &mut [Swath]) {
+    let mut current = start_point;
+    for swath in traversal.iter_mut() {
+        let head_dist = point_distance(current, swath.head());
+        let tail_dist = point_distance(current, swath.tail());
+        if tail_dist < head_dist {
+            swath.swap_direction();
+        }
+        current = swath.tail();
+    }
+}
+
+fn deadhead_distance(start_point: Point, traversal: &[Swath]) -> f64 {
+    if traversal.is_empty() {
+        return 0.0;
+    }
+    let mut total = point_distance(start_point, traversal[0].head());
+    for pair in traversal.windows(2) {
+        total += point_distance(pair[0].tail(), pair[1].head());
+    }
+    total
 }

@@ -19,6 +19,15 @@ Current scope:
 - tour building
 - high-level `Maptrax` facade
 
+Planner stages exposed by the facade:
+
+1. field generation
+2. decomposition
+3. obstacle avoidance
+4. routing / swath ordering
+5. tour building
+6. multi-machine planning
+
 Sibling local dependencies:
 
 - `../graphix_rs`
@@ -54,7 +63,51 @@ assert!(!field.get_parts()[0].swaths.is_empty());
 Runnable workflows live in [`examples/`](examples):
 
 - `field_generation.rs`
+- `planner_stages.rs`
 - `division.rs`
 - `traversal.rs`
 - `obstacle_avoidance.rs`
 - `facade_end_to_end.rs`
+- `farmtrax_rerun.rs`
+- `main_multi_obstacle.rs`
+- `main_decomposed.rs`
+- `main_machine_modes.rs`
+
+## Staged Planning
+
+Use `Maptrax::plan_stages(...)` when you want explicit outputs from each planner stage instead of only the final ordered swaths and tour:
+
+```rust
+use concord::Geo;
+use geo::Point;
+use maptrax::{
+    FieldGenerationMode, FieldGenerationOptions, Maptrax, PlannerOptions, polygon_from_points,
+};
+
+let polygon = polygon_from_points(vec![
+    Point::new(0.0, 0.0),
+    Point::new(100.0, 0.0),
+    Point::new(100.0, 50.0),
+    Point::new(0.0, 50.0),
+]);
+
+let mut planner = Maptrax::new();
+planner.set_field(polygon, Geo::new(51.0, 5.0, 0.0)).expect("field");
+
+let planned = planner
+    .plan_stages(&PlannerOptions {
+        field: FieldGenerationOptions {
+            swath_width: 10.0,
+            headland_count: 1,
+            mode: FieldGenerationMode::ExplicitAngle(90.0),
+            ..FieldGenerationOptions::default()
+        },
+        ..PlannerOptions::default()
+    })
+    .expect("plan");
+
+assert_eq!(planned.parts[0].headlands.len(), 1);
+assert!(!planned.parts[0].generated_swaths.is_empty());
+assert!(!planned.parts[0].ordered_swaths.is_empty());
+assert!(!planned.parts[0].tour.is_empty());
+```

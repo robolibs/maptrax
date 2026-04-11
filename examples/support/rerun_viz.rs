@@ -1,8 +1,10 @@
+#![allow(dead_code)]
+
 use std::error::Error;
 
 use concord::{Geo, Wgs, to_wgs_from_enu};
 use geo::{LineString, Point, Polygon};
-use maptrax::{Swath, SwathType};
+use maptrax::{Pose2D, Swath, SwathType};
 use rerun::{Color, GeoLineStrings, LineStrips2D, RecordingStream, RecordingStreamBuilder};
 
 pub fn connect(app_id: &str) -> Result<RecordingStream, Box<dyn Error>> {
@@ -51,12 +53,7 @@ fn log_swaths_with_palette(
 
     for swath in swaths {
         let strip = if swath.points.len() >= 2 {
-            swath
-                .points
-                .iter()
-                .copied()
-                .map(point2)
-                .collect::<Vec<_>>()
+            swath.points.iter().copied().map(point2).collect::<Vec<_>>()
         } else {
             vec![point2(swath.head()), point2(swath.tail())]
         };
@@ -82,7 +79,10 @@ pub fn log_polygon_geo(
     color: Color,
 ) -> Result<(), Box<dyn Error>> {
     let strip = close_geo_points(line_string_geo_points(polygon.exterior(), datum));
-    rec.log(path, &GeoLineStrings::from_lat_lon([strip]).with_colors([color]))?;
+    rec.log(
+        path,
+        &GeoLineStrings::from_lat_lon([strip]).with_colors([color]),
+    )?;
     Ok(())
 }
 
@@ -114,7 +114,10 @@ pub fn log_swaths_geo_tinted(
                 .map(|point| point_geo(point, datum))
                 .collect::<Vec<_>>()
         } else {
-            vec![point_geo(swath.head(), datum), point_geo(swath.tail(), datum)]
+            vec![
+                point_geo(swath.head(), datum),
+                point_geo(swath.tail(), datum),
+            ]
         };
         if strip.len() < 2 {
             continue;
@@ -124,7 +127,10 @@ pub fn log_swaths_geo_tinted(
     }
 
     if !strips.is_empty() {
-        rec.log(path, &GeoLineStrings::from_lat_lon(strips).with_colors(colors))?;
+        rec.log(
+            path,
+            &GeoLineStrings::from_lat_lon(strips).with_colors(colors),
+        )?;
     }
 
     Ok(())
@@ -158,6 +164,107 @@ fn close_geo_points(mut points: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
 
 fn point2(point: Point<f64>) -> [f32; 2] {
     [point.x() as f32, point.y() as f32]
+}
+
+pub fn log_pose(
+    rec: &RecordingStream,
+    path: &str,
+    pose: Pose2D,
+    color: Color,
+    axis_length: f64,
+) -> Result<(), Box<dyn Error>> {
+    let head = pose.point;
+    let tip = Point::new(
+        head.x() + axis_length * pose.yaw.cos(),
+        head.y() + axis_length * pose.yaw.sin(),
+    );
+    let left = Point::new(
+        tip.x() - axis_length * 0.25 * (pose.yaw - 2.6).cos(),
+        tip.y() - axis_length * 0.25 * (pose.yaw - 2.6).sin(),
+    );
+    let right = Point::new(
+        tip.x() - axis_length * 0.25 * (pose.yaw + 2.6).cos(),
+        tip.y() - axis_length * 0.25 * (pose.yaw + 2.6).sin(),
+    );
+    let strips = vec![
+        vec![point2(head), point2(tip)],
+        vec![point2(tip), point2(left)],
+        vec![point2(tip), point2(right)],
+    ];
+    rec.log(
+        path,
+        &LineStrips2D::new(strips).with_colors([color, color, color]),
+    )?;
+    Ok(())
+}
+
+pub fn log_pose_geo(
+    rec: &RecordingStream,
+    path: &str,
+    pose: Pose2D,
+    datum: Geo,
+    color: Color,
+    axis_length: f64,
+) -> Result<(), Box<dyn Error>> {
+    let head = pose.point;
+    let tip = Point::new(
+        head.x() + axis_length * pose.yaw.cos(),
+        head.y() + axis_length * pose.yaw.sin(),
+    );
+    let left = Point::new(
+        tip.x() - axis_length * 0.25 * (pose.yaw - 2.6).cos(),
+        tip.y() - axis_length * 0.25 * (pose.yaw - 2.6).sin(),
+    );
+    let right = Point::new(
+        tip.x() - axis_length * 0.25 * (pose.yaw + 2.6).cos(),
+        tip.y() - axis_length * 0.25 * (pose.yaw + 2.6).sin(),
+    );
+    let strips = vec![
+        vec![point_geo(head, datum), point_geo(tip, datum)],
+        vec![point_geo(tip, datum), point_geo(left, datum)],
+        vec![point_geo(tip, datum), point_geo(right, datum)],
+    ];
+    rec.log(
+        path,
+        &GeoLineStrings::from_lat_lon(strips).with_colors([color, color, color]),
+    )?;
+    Ok(())
+}
+
+pub fn log_pose_path(
+    rec: &RecordingStream,
+    path: &str,
+    poses: &[Pose2D],
+    color: Color,
+) -> Result<(), Box<dyn Error>> {
+    let strip = poses
+        .iter()
+        .map(|pose| point2(pose.point))
+        .collect::<Vec<_>>();
+    if strip.len() >= 2 {
+        rec.log(path, &LineStrips2D::new([strip]).with_colors([color]))?;
+    }
+    Ok(())
+}
+
+pub fn log_pose_path_geo(
+    rec: &RecordingStream,
+    path: &str,
+    poses: &[Pose2D],
+    datum: Geo,
+    color: Color,
+) -> Result<(), Box<dyn Error>> {
+    let strip = poses
+        .iter()
+        .map(|pose| point_geo(pose.point, datum))
+        .collect::<Vec<_>>();
+    if strip.len() >= 2 {
+        rec.log(
+            path,
+            &GeoLineStrings::from_lat_lon([strip]).with_colors([color]),
+        )?;
+    }
+    Ok(())
 }
 
 fn point_geo(point: Point<f64>, datum: Geo) -> [f64; 2] {

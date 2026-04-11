@@ -3,7 +3,8 @@ use geo::{Point, Polygon};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::{
-    point_distance, polygon_from_points, polygon_open_vertices, segment_distance_to_point, segment_new,
+    point_distance, polygon_from_points, polygon_open_vertices, segment_distance_to_point,
+    segment_new,
 };
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -37,7 +38,9 @@ pub fn angle_between(v1: Point, v2: Point) -> f64 {
 }
 
 pub fn are_colinear(p1: Point, p2: Point, p3: Point, epsilon: f64) -> bool {
-    let area = (p1.x() * (p2.y() - p3.y()) + p2.x() * (p3.y() - p1.y()) + p3.x() * (p1.y() - p2.y())) * 0.5;
+    let area =
+        (p1.x() * (p2.y() - p3.y()) + p2.x() * (p3.y() - p1.y()) + p3.x() * (p1.y() - p2.y()))
+            * 0.5;
     area.abs() < epsilon
 }
 

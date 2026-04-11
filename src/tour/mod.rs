@@ -1,3 +1,3 @@
 mod builder;
 
-pub use builder::{TourBuilder, TurnPlannerConfig, TurnPlannerModel};
+pub use builder::{ConnectorMode, TourBuilder, TurnPlannerConfig, TurnPlannerModel};
