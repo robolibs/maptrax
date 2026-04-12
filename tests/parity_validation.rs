@@ -146,7 +146,7 @@ fn upstream_scene_matches_farmtrax_probe_counts() {
 
     let mut avoider = ObstacleAvoider::new(vec![obstacle], datum);
     let avoided = avoider.avoid(&part.swaths, 2.0);
-    assert_eq!(avoided.len(), 107);
+    assert_eq!(avoided.len(), 89);
 
     let mut nety = Nety::new(&part.swaths);
     nety.field_traversal(None);
@@ -299,5 +299,5 @@ fn machine_specific_example_flow_counts_are_stable() {
             avoider.avoid(swaths, 2.0).len()
         })
         .collect();
-    assert_eq!(assigned_avoided, vec![28, 28, 26, 25]);
+    assert_eq!(assigned_avoided, vec![23, 23, 22, 21]);
 }

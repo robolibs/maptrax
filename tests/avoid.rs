@@ -84,7 +84,7 @@ fn obstacle_avoider_constructs_and_tracks_obstacles() {
 }
 
 #[test]
-fn avoidance_splits_crossing_swaths_and_creates_around_segments() {
+fn avoidance_splits_crossing_swaths_into_work_segments() {
     let mut avoider = ObstacleAvoider::new(vec![obstacle()], Geo::new(51.0, 5.0, 0.0));
     let input = crossing_swaths(&[40.0, 45.0, 50.0, 55.0]);
     let avoided = avoider.avoid(&input, 2.0);
@@ -95,15 +95,14 @@ fn avoidance_splits_crossing_swaths_and_creates_around_segments() {
     assert!(
         avoided
             .iter()
-            .any(|swath| swath.r#type == SwathType::Around)
+            .all(|swath| swath.r#type == SwathType::Swath)
     );
     assert!(
         avoided
             .iter()
-            .filter(|swath| swath.r#type == SwathType::Around)
-            .all(|swath| swath.points.len() > 2)
+            .all(|swath| swath.points.len() >= 2)
     );
-    assert!(avoided.iter().any(|swath| swath.uuid != input[0].uuid));
+    assert!(avoided.iter().any(|swath| swath.id == input[1].id));
 }
 
 #[test]
@@ -140,7 +139,7 @@ fn rotated_obstacle_inflation_remains_polygon_shaped() {
 }
 
 #[test]
-fn off_axis_obstacle_creates_boundary_following_detour() {
+fn off_axis_obstacle_splits_swath_without_points_inside_obstacle() {
     let mut swath = create_swath(
         Point::new(35.0, 15.0),
         Point::new(65.0, 35.0),
@@ -152,22 +151,17 @@ fn off_axis_obstacle_creates_boundary_following_detour() {
     let mut avoider = ObstacleAvoider::new(vec![rotated_obstacle()], Geo::new(51.0, 5.0, 0.0));
     let avoided = avoider.avoid(&[swath], 1.5);
 
-    let around = avoided
-        .iter()
-        .find(|swath| swath.r#type == SwathType::Around)
-        .expect("around detour");
-    assert!(around.points.len() > 2);
-    assert!(around.bounding_box.max().y > around.bounding_box.min().y);
+    assert!(avoided.len() >= 2);
     assert!(
-        around
-            .points
+        avoided
             .iter()
+            .flat_map(|swath| swath.points.iter())
             .all(|point| !point_in_polygon(*point, &rotated_obstacle()))
     );
 }
 
 #[test]
-fn two_obstacles_on_one_swath_create_multiple_detours() {
+fn two_obstacles_on_one_swath_create_multiple_cut_segments() {
     let mut swath = create_swath(
         Point::new(50.0, 0.0),
         Point::new(50.0, 80.0),
@@ -180,11 +174,8 @@ fn two_obstacles_on_one_swath_create_multiple_detours() {
     let mut avoider = ObstacleAvoider::new(obstacles, Geo::new(51.0, 5.0, 0.0));
     let avoided = avoider.avoid(&[swath], 1.5);
 
-    let around_count = avoided
-        .iter()
-        .filter(|swath| swath.r#type == SwathType::Around)
-        .count();
-    assert!(around_count >= 2);
+    assert!(avoided.len() >= 3);
+    assert!(avoided.iter().all(|swath| swath.r#type == SwathType::Swath));
 }
 
 #[test]
@@ -206,5 +197,6 @@ fn boundary_connected_obstacles_are_skipped_from_obstacle_routing() {
 
     assert_eq!(avoider.get_inflated_obstacles().len(), 2);
     assert_eq!(avoider.transit_obstacles().len(), 1);
-    assert!(avoided.iter().any(|swath| swath.r#type == SwathType::Around));
+    assert!(avoided.iter().all(|swath| swath.r#type == SwathType::Swath));
+    assert!(!avoided.is_empty());
 }

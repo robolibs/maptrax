@@ -65,7 +65,9 @@ help:
 	@echo
 	@echo "Examples:"
 	@echo "  make run"
-	@echo "  make run EXAMPLE=simple_graph"
+	@echo "  make run EXAMPLE=main_multi_obstacle"
+	@echo "  cd examples/c_abi && make"
+	@echo "  cd examples/python_binding && make"
 	@echo
 
 h: help

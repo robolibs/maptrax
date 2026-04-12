@@ -1,9 +1,12 @@
 pub mod avoid;
 pub mod core;
 pub mod division;
+pub mod ffi;
 pub mod facade;
 pub mod field;
 pub mod net;
+#[cfg(feature = "python")]
+pub mod python;
 pub mod tour;
 pub mod turners;
 

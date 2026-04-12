@@ -8,11 +8,17 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+python = ["dep:pyo3"]
 
 [dependencies]
 concord = { path = "../concord_rs" }
 graphix = { path = "../graphix_rs" }
 geo = "0.31"
+pyo3 = { version = "0.23", optional = true, features = ["abi3-py39", "auto-initialize", "extension-module"] }
 
 [dev-dependencies]
 rerun = { version = "0.31.2", default-features = false, features = ["sdk", "server"] }

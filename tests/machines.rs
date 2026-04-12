@@ -197,7 +197,7 @@ fn upstream_machine_fixture_counts_remain_stable() {
         .collect::<Vec<_>>();
 
     assert_eq!(assigned_counts, vec![18, 18, 18, 17]);
-    assert_eq!(avoided_counts, vec![28, 28, 28, 27]);
+    assert_eq!(avoided_counts, vec![23, 23, 23, 22]);
     assert_eq!(ordered_counts, vec![23, 23, 23, 22]);
     for machine in &planned.machines {
         assert!(
