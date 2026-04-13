@@ -16,7 +16,7 @@ endif
 VENV := .venv
 VENV_PYTHON := $(CURDIR)/$(VENV)/bin/python
 
-.PHONY: all develop basic turners rerun clean
+.PHONY: all develop basic turners rerun main main-no-obstacle main-extended clean
 
 all: basic
 
@@ -35,6 +35,18 @@ turners: develop
 rerun: develop
 	@$(VENV_PYTHON) -m pip install rerun-sdk
 	@$(VENV_PYTHON) rerun_demo.py
+
+main: develop
+	@$(VENV_PYTHON) -m pip install rerun-sdk
+	@$(VENV_PYTHON) main.py
+
+main-no-obstacle: develop
+	@$(VENV_PYTHON) -m pip install rerun-sdk
+	@$(VENV_PYTHON) main_no_obstacle.py
+
+main-extended: develop
+	@$(VENV_PYTHON) -m pip install rerun-sdk
+	@$(VENV_PYTHON) main_extended.py
 
 clean:
 	@rm -rf $(VENV)

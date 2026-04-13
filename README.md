@@ -76,6 +76,7 @@ Runnable workflows live in [`examples/`](examples):
 - `python_binding/basic.py`
 - `python_binding/turners.py`
 - `python_binding/rerun_demo.py`
+- `python_binding/main.py`
 
 ## Bindings
 
@@ -98,7 +99,7 @@ Python surface:
 
 - Python module implementation: [`src/python.rs`](/home/bresilla/data/code/robolibs/maptrax_rs/src/python.rs)
 - packaging config: [`pyproject.toml`](/home/bresilla/data/code/robolibs/maptrax_rs/pyproject.toml)
-- examples: [`examples/python_binding/basic.py`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/basic.py), [`examples/python_binding/turners.py`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/turners.py), [`examples/python_binding/rerun_demo.py`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/rerun_demo.py)
+- examples: [`examples/python_binding/basic.py`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/basic.py), [`examples/python_binding/turners.py`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/turners.py), [`examples/python_binding/rerun_demo.py`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/rerun_demo.py), [`examples/python_binding/main.py`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/main.py)
 - local makefile: [`examples/python_binding/Makefile`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/Makefile)
 
 Build and install the Python module with `maturin`:
@@ -109,6 +110,7 @@ cd examples/python_binding
 make basic
 make turners
 make rerun
+make main
 ```
 
 The Python example makefile uses `PYO3_PYTHON` from the flake shell, creates a local `.venv`, and installs the extension into that environment so `pyo3`, `maturin`, and the runtime interpreter stay aligned.

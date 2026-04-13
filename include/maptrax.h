@@ -11,6 +11,8 @@ extern "C" {
 
 typedef struct MaptraxPlannerHandle MaptraxPlannerHandle;
 typedef struct MaptraxPlanResultHandle MaptraxPlanResultHandle;
+typedef struct MaptraxStagesResultHandle MaptraxStagesResultHandle;
+typedef struct MaptraxPartSnapshotHandle MaptraxPartSnapshotHandle;
 typedef struct MaptraxPosePathHandle MaptraxPosePathHandle;
 
 typedef struct {
@@ -93,6 +95,18 @@ typedef struct {
 } MaptraxSwathBufferView;
 
 typedef struct {
+  size_t point_offset;
+  size_t point_len;
+} MaptraxRingView;
+
+typedef struct {
+  const MaptraxRingView* rings;
+  size_t rings_len;
+  const MaptraxCoord2* points;
+  size_t points_len;
+} MaptraxRingBufferView;
+
+typedef struct {
   const MaptraxPose2* poses;
   size_t poses_len;
   double total_length;
@@ -114,7 +128,30 @@ bool maptrax_planner_generate_field(
     MaptraxPlannerHandle* planner,
     MaptraxFieldOptions options);
 
+size_t maptrax_planner_part_count(const MaptraxPlannerHandle* planner);
+double maptrax_planner_total_area(const MaptraxPlannerHandle* planner);
+
+MaptraxPartSnapshotHandle* maptrax_planner_part_snapshot(
+    const MaptraxPlannerHandle* planner,
+    size_t part_index);
+
+void maptrax_part_snapshot_free(MaptraxPartSnapshotHandle* snapshot);
+MaptraxRingBufferView maptrax_part_snapshot_boundary_view(
+    const MaptraxPartSnapshotHandle* snapshot);
+MaptraxRingBufferView maptrax_part_snapshot_headlands_view(
+    const MaptraxPartSnapshotHandle* snapshot);
+MaptraxRingBufferView maptrax_part_snapshot_transit_rings_view(
+    const MaptraxPartSnapshotHandle* snapshot);
+MaptraxSwathBufferView maptrax_part_snapshot_swaths_view(
+    const MaptraxPartSnapshotHandle* snapshot);
+
 MaptraxPlanResultHandle* maptrax_planner_plan_part(
+    const MaptraxPlannerHandle* planner,
+    size_t part_index,
+    MaptraxRoutingOptions routing,
+    MaptraxTurnOptions turn);
+
+MaptraxStagesResultHandle* maptrax_planner_plan_stages_part(
     const MaptraxPlannerHandle* planner,
     size_t part_index,
     MaptraxRoutingOptions routing,
@@ -125,6 +162,20 @@ MaptraxSwathBufferView maptrax_plan_result_ordered_view(
     const MaptraxPlanResultHandle* result);
 MaptraxSwathBufferView maptrax_plan_result_tour_view(
     const MaptraxPlanResultHandle* result);
+
+void maptrax_stages_result_free(MaptraxStagesResultHandle* result);
+MaptraxRingBufferView maptrax_stages_result_headlands_view(
+    const MaptraxStagesResultHandle* result);
+MaptraxRingBufferView maptrax_stages_result_transit_rings_view(
+    const MaptraxStagesResultHandle* result);
+MaptraxSwathBufferView maptrax_stages_result_generated_view(
+    const MaptraxStagesResultHandle* result);
+MaptraxSwathBufferView maptrax_stages_result_avoided_view(
+    const MaptraxStagesResultHandle* result);
+MaptraxSwathBufferView maptrax_stages_result_ordered_view(
+    const MaptraxStagesResultHandle* result);
+MaptraxSwathBufferView maptrax_stages_result_tour_view(
+    const MaptraxStagesResultHandle* result);
 
 MaptraxPosePathHandle* maptrax_plan_dubins(
     MaptraxPose2 start,

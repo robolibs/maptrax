@@ -5,9 +5,8 @@ use std::ptr;
 use geo::Point;
 
 use crate::{
-    ConnectorMode, FieldGenerationMode, FieldGenerationOptions, Geo, Maptrax, PlannerOptions,
-    Pose2D, RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel,
-    polygon_from_points,
+    ConnectorMode, Geo, Maptrax, Pose2D, RoutingOptions, RoutingStrategy, TurnPlannerConfig,
+    TurnPlannerModel, polygon_from_points,
 };
 
 thread_local! {
@@ -136,6 +135,43 @@ struct FlatSwathBuffer {
 }
 
 pub struct MaptraxPlanResultHandle {
+    ordered: FlatSwathBuffer,
+    tour: FlatSwathBuffer,
+}
+
+pub struct MaptraxPartSnapshotHandle {
+    boundary: FlatRingBuffer,
+    headlands: FlatRingBuffer,
+    transit_rings: FlatRingBuffer,
+    swaths: FlatSwathBuffer,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MaptraxRingView {
+    pub point_offset: usize,
+    pub point_len: usize,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct MaptraxRingBufferView {
+    pub rings: *const MaptraxRingView,
+    pub rings_len: usize,
+    pub points: *const MaptraxCoord2,
+    pub points_len: usize,
+}
+
+struct FlatRingBuffer {
+    rings: Vec<MaptraxRingView>,
+    points: Vec<MaptraxCoord2>,
+}
+
+pub struct MaptraxStagesResultHandle {
+    headlands: FlatRingBuffer,
+    transit_rings: FlatRingBuffer,
+    generated: FlatSwathBuffer,
+    avoided: FlatSwathBuffer,
     ordered: FlatSwathBuffer,
     tour: FlatSwathBuffer,
 }
@@ -274,12 +310,49 @@ fn flatten_swaths(swaths: &[crate::Swath]) -> FlatSwathBuffer {
     }
 }
 
+fn flatten_rings(rings: &[crate::Ring]) -> FlatRingBuffer {
+    let mut point_buffer = Vec::new();
+    let mut ring_buffer = Vec::with_capacity(rings.len());
+
+    for ring in rings {
+        let offset = point_buffer.len();
+        let points = ring
+            .polygon
+            .exterior()
+            .points()
+            .map(|point| MaptraxCoord2 {
+                x: point.x(),
+                y: point.y(),
+            })
+            .collect::<Vec<_>>();
+        point_buffer.extend(points.iter().copied());
+        ring_buffer.push(MaptraxRingView {
+            point_offset: offset,
+            point_len: points.len(),
+        });
+    }
+
+    FlatRingBuffer {
+        rings: ring_buffer,
+        points: point_buffer,
+    }
+}
+
 fn pose_buffer_view(handle: &MaptraxPosePathHandle) -> MaptraxPoseBufferView {
     MaptraxPoseBufferView {
         poses: handle.poses.as_ptr(),
         poses_len: handle.poses.len(),
         total_length: handle.total_length,
         name: handle.name.as_ptr(),
+    }
+}
+
+fn ring_buffer_view(buffer: &FlatRingBuffer) -> MaptraxRingBufferView {
+    MaptraxRingBufferView {
+        rings: buffer.rings.as_ptr(),
+        rings_len: buffer.rings.len(),
+        points: buffer.points.as_ptr(),
+        points_len: buffer.points.len(),
     }
 }
 
@@ -388,6 +461,62 @@ pub extern "C" fn maptrax_planner_generate_field(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn maptrax_planner_part_count(planner: *const MaptraxPlannerHandle) -> usize {
+    match planner_from_ptr(planner).and_then(|planner| Ok(planner.planner.field()?.parts().len())) {
+        Ok(count) => {
+            clear_last_error();
+            count
+        }
+        Err(err) => {
+            set_last_error(err.to_string());
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_planner_total_area(planner: *const MaptraxPlannerHandle) -> f64 {
+    match planner_from_ptr(planner).and_then(|planner| Ok(planner.planner.field()?.total_area())) {
+        Ok(area) => {
+            clear_last_error();
+            area
+        }
+        Err(err) => {
+            set_last_error(err.to_string());
+            0.0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_planner_part_snapshot(
+    planner: *const MaptraxPlannerHandle,
+    part_index: usize,
+) -> *mut MaptraxPartSnapshotHandle {
+    let result = (|| {
+        let planner = planner_from_ptr(planner)?;
+        let part = planner.planner.field()?.part(part_index)?;
+        Ok::<_, crate::MaptraxError>(MaptraxPartSnapshotHandle {
+            boundary: flatten_rings(std::slice::from_ref(&part.boundary)),
+            headlands: flatten_rings(&part.headlands),
+            transit_rings: flatten_rings(&part.transit_rings),
+            swaths: flatten_swaths(&part.swaths),
+        })
+    })();
+
+    match result {
+        Ok(handle) => {
+            clear_last_error();
+            Box::into_raw(Box::new(handle))
+        }
+        Err(err) => {
+            set_last_error(err.to_string());
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn maptrax_planner_plan_part(
     planner: *const MaptraxPlannerHandle,
     part_index: usize,
@@ -421,6 +550,43 @@ pub extern "C" fn maptrax_planner_plan_part(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn maptrax_planner_plan_stages_part(
+    planner: *const MaptraxPlannerHandle,
+    part_index: usize,
+    routing: MaptraxRoutingOptions,
+    turn: MaptraxTurnOptions,
+) -> *mut MaptraxStagesResultHandle {
+    let result = (|| {
+        let planner = planner_from_ptr(planner)?;
+        let staged = planner.planner.plan_stages_for_part(
+            part_index,
+            routing_options_from_ffi(routing),
+            &crate::ObstaclePlanningOptions::default(),
+            &turn_options_from_ffi(turn),
+        )?;
+        Ok::<_, crate::MaptraxError>(MaptraxStagesResultHandle {
+            headlands: flatten_rings(&staged.headlands),
+            transit_rings: flatten_rings(&staged.transit_rings),
+            generated: flatten_swaths(&staged.generated_swaths),
+            avoided: flatten_swaths(&staged.avoided_swaths),
+            ordered: flatten_swaths(&staged.ordered_swaths),
+            tour: flatten_swaths(&staged.tour),
+        })
+    })();
+
+    match result {
+        Ok(handle) => {
+            clear_last_error();
+            Box::into_raw(Box::new(handle))
+        }
+        Err(err) => {
+            set_last_error(err.to_string());
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn maptrax_plan_result_free(result: *mut MaptraxPlanResultHandle) {
     if result.is_null() {
         return;
@@ -428,6 +594,28 @@ pub extern "C" fn maptrax_plan_result_free(result: *mut MaptraxPlanResultHandle)
     // SAFETY: pointer originated from Box::into_raw in maptrax_planner_plan_part.
     unsafe {
         drop(Box::from_raw(result));
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_stages_result_free(result: *mut MaptraxStagesResultHandle) {
+    if result.is_null() {
+        return;
+    }
+    // SAFETY: pointer originated from Box::into_raw in maptrax_planner_plan_stages_part.
+    unsafe {
+        drop(Box::from_raw(result));
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_part_snapshot_free(snapshot: *mut MaptraxPartSnapshotHandle) {
+    if snapshot.is_null() {
+        return;
+    }
+    // SAFETY: pointer originated from Box::into_raw in maptrax_planner_part_snapshot.
+    unsafe {
+        drop(Box::from_raw(snapshot));
     }
 }
 
@@ -445,6 +633,156 @@ pub extern "C" fn maptrax_plan_result_ordered_view(
     }
     // SAFETY: validated non-null above.
     swath_buffer_view(unsafe { &(*result).ordered })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_stages_result_headlands_view(
+    result: *const MaptraxStagesResultHandle,
+) -> MaptraxRingBufferView {
+    if result.is_null() {
+        return MaptraxRingBufferView {
+            rings: ptr::null(),
+            rings_len: 0,
+            points: ptr::null(),
+            points_len: 0,
+        };
+    }
+    ring_buffer_view(unsafe { &(*result).headlands })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_stages_result_transit_rings_view(
+    result: *const MaptraxStagesResultHandle,
+) -> MaptraxRingBufferView {
+    if result.is_null() {
+        return MaptraxRingBufferView {
+            rings: ptr::null(),
+            rings_len: 0,
+            points: ptr::null(),
+            points_len: 0,
+        };
+    }
+    ring_buffer_view(unsafe { &(*result).transit_rings })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_part_snapshot_boundary_view(
+    snapshot: *const MaptraxPartSnapshotHandle,
+) -> MaptraxRingBufferView {
+    if snapshot.is_null() {
+        return MaptraxRingBufferView {
+            rings: ptr::null(),
+            rings_len: 0,
+            points: ptr::null(),
+            points_len: 0,
+        };
+    }
+    ring_buffer_view(unsafe { &(*snapshot).boundary })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_part_snapshot_headlands_view(
+    snapshot: *const MaptraxPartSnapshotHandle,
+) -> MaptraxRingBufferView {
+    if snapshot.is_null() {
+        return MaptraxRingBufferView {
+            rings: ptr::null(),
+            rings_len: 0,
+            points: ptr::null(),
+            points_len: 0,
+        };
+    }
+    ring_buffer_view(unsafe { &(*snapshot).headlands })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_part_snapshot_transit_rings_view(
+    snapshot: *const MaptraxPartSnapshotHandle,
+) -> MaptraxRingBufferView {
+    if snapshot.is_null() {
+        return MaptraxRingBufferView {
+            rings: ptr::null(),
+            rings_len: 0,
+            points: ptr::null(),
+            points_len: 0,
+        };
+    }
+    ring_buffer_view(unsafe { &(*snapshot).transit_rings })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_part_snapshot_swaths_view(
+    snapshot: *const MaptraxPartSnapshotHandle,
+) -> MaptraxSwathBufferView {
+    if snapshot.is_null() {
+        return MaptraxSwathBufferView {
+            swaths: ptr::null(),
+            swaths_len: 0,
+            points: ptr::null(),
+            points_len: 0,
+        };
+    }
+    swath_buffer_view(unsafe { &(*snapshot).swaths })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_stages_result_generated_view(
+    result: *const MaptraxStagesResultHandle,
+) -> MaptraxSwathBufferView {
+    if result.is_null() {
+        return MaptraxSwathBufferView {
+            swaths: ptr::null(),
+            swaths_len: 0,
+            points: ptr::null(),
+            points_len: 0,
+        };
+    }
+    swath_buffer_view(unsafe { &(*result).generated })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_stages_result_avoided_view(
+    result: *const MaptraxStagesResultHandle,
+) -> MaptraxSwathBufferView {
+    if result.is_null() {
+        return MaptraxSwathBufferView {
+            swaths: ptr::null(),
+            swaths_len: 0,
+            points: ptr::null(),
+            points_len: 0,
+        };
+    }
+    swath_buffer_view(unsafe { &(*result).avoided })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_stages_result_ordered_view(
+    result: *const MaptraxStagesResultHandle,
+) -> MaptraxSwathBufferView {
+    if result.is_null() {
+        return MaptraxSwathBufferView {
+            swaths: ptr::null(),
+            swaths_len: 0,
+            points: ptr::null(),
+            points_len: 0,
+        };
+    }
+    swath_buffer_view(unsafe { &(*result).ordered })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_stages_result_tour_view(
+    result: *const MaptraxStagesResultHandle,
+) -> MaptraxSwathBufferView {
+    if result.is_null() {
+        return MaptraxSwathBufferView {
+            swaths: ptr::null(),
+            swaths_len: 0,
+            points: ptr::null(),
+            points_len: 0,
+        };
+    }
+    swath_buffer_view(unsafe { &(*result).tour })
 }
 
 #[unsafe(no_mangle)]
@@ -621,5 +959,113 @@ mod tests {
         assert!(view.total_length > 0.0);
         assert!(!view.name.is_null());
         maptrax_pose_path_free(handle);
+    }
+
+    #[test]
+    fn c_abi_exposes_staged_part_buffers() {
+        let planner = maptrax_planner_new();
+        let border = [
+            MaptraxCoord2 { x: 0.0, y: 0.0 },
+            MaptraxCoord2 { x: 100.0, y: 0.0 },
+            MaptraxCoord2 { x: 100.0, y: 50.0 },
+            MaptraxCoord2 { x: 0.0, y: 50.0 },
+        ];
+
+        assert!(maptrax_planner_set_field(
+            planner,
+            border.as_ptr(),
+            border.len(),
+            MaptraxGeo3 {
+                latitude: 51.0,
+                longitude: 5.0,
+                altitude: 0.0,
+            },
+        ));
+        assert!(maptrax_planner_generate_field(
+            planner,
+            MaptraxFieldOptions {
+                swath_width: 10.0,
+                angle_degrees: 90.0,
+                headland_count: 1,
+            },
+        ));
+
+        let result = maptrax_planner_plan_stages_part(
+            planner,
+            0,
+            MaptraxRoutingOptions {
+                strategy: MaptraxRoutingStrategy::GreedyNearest,
+                local_improvement_passes: 0,
+            },
+            MaptraxTurnOptions {
+                model: MaptraxTurnModel::ReedsShepp,
+                connector_mode: MaptraxConnectorMode::Auto,
+                min_turning_radius: 2.0,
+                step_size: 0.2,
+                machine_length: 6.0,
+                machine_width: 3.0,
+                swath_width: 10.0,
+            },
+        );
+        assert!(!result.is_null());
+
+        let headlands = maptrax_stages_result_headlands_view(result);
+        let generated = maptrax_stages_result_generated_view(result);
+        let ordered = maptrax_stages_result_ordered_view(result);
+        let tour = maptrax_stages_result_tour_view(result);
+        assert!(headlands.rings_len > 0);
+        assert!(generated.swaths_len > 0);
+        assert!(ordered.swaths_len > 0);
+        assert!(tour.swaths_len >= ordered.swaths_len);
+
+        maptrax_stages_result_free(result);
+        maptrax_planner_free(planner);
+    }
+
+    #[test]
+    fn c_abi_exposes_part_snapshot_and_field_info() {
+        let planner = maptrax_planner_new();
+        let border = [
+            MaptraxCoord2 { x: 0.0, y: 0.0 },
+            MaptraxCoord2 { x: 100.0, y: 0.0 },
+            MaptraxCoord2 { x: 100.0, y: 50.0 },
+            MaptraxCoord2 { x: 0.0, y: 50.0 },
+        ];
+
+        assert!(maptrax_planner_set_field(
+            planner,
+            border.as_ptr(),
+            border.len(),
+            MaptraxGeo3 {
+                latitude: 51.0,
+                longitude: 5.0,
+                altitude: 0.0,
+            },
+        ));
+        assert!(maptrax_planner_generate_field(
+            planner,
+            MaptraxFieldOptions {
+                swath_width: 10.0,
+                angle_degrees: 90.0,
+                headland_count: 1,
+            },
+        ));
+
+        assert_eq!(maptrax_planner_part_count(planner), 1);
+        assert!(maptrax_planner_total_area(planner) > 0.0);
+
+        let snapshot = maptrax_planner_part_snapshot(planner, 0);
+        assert!(!snapshot.is_null());
+
+        let boundary = maptrax_part_snapshot_boundary_view(snapshot);
+        let headlands = maptrax_part_snapshot_headlands_view(snapshot);
+        let swaths = maptrax_part_snapshot_swaths_view(snapshot);
+        assert_eq!(boundary.rings_len, 1);
+        assert!(boundary.points_len >= 4);
+        assert!(headlands.rings_len > 0);
+        assert!(swaths.swaths_len > 0);
+
+        maptrax_part_snapshot_free(snapshot);
+        maptrax_planner_free(planner);
     }
 }
