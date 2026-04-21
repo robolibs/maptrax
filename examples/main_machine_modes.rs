@@ -4,8 +4,9 @@ mod example_scenes;
 mod rerun_viz;
 
 use maptrax::{
-    ConnectorMode, DivisionType, Field, MachinePlanningOptions, Maptrax, ObstaclePlanningOptions,
-    RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel,
+    Balance, ConnectorMode, DivisionPattern, DivisionPlan, Field, MachinePlanningOptions, Maptrax,
+    ObstaclePlanningOptions, OptimizeObjective, RoutingOptions, RoutingStrategy, TurnPlannerConfig,
+    TurnPlannerModel,
 };
 use rerun::Color;
 
@@ -45,22 +46,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Color::from_rgb(220, 40, 40),
     )?;
 
-    for division_type in [
-        DivisionType::Alternate,
-        DivisionType::Block,
-        DivisionType::SpatialRtree,
-        DivisionType::LengthBalanced,
-    ]
-    .into_iter()
-    {
+    let scenarios: Vec<(&'static str, DivisionPlan)> = vec![
+        (
+            "stripe_by_count",
+            DivisionPlan::uniform(3, DivisionPattern::Stripe { stride: 1 }, Balance::ByCount),
+        ),
+        (
+            "stripe_stride_2",
+            DivisionPlan::uniform(3, DivisionPattern::Stripe { stride: 2 }, Balance::ByCount),
+        ),
+        (
+            "block_by_count",
+            DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByCount),
+        ),
+        (
+            "block_by_length",
+            DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByLength),
+        ),
+        (
+            "banded_stripe_2",
+            DivisionPlan::uniform(
+                3,
+                DivisionPattern::BandedStripe { bands: 2 },
+                Balance::ByLength,
+            ),
+        ),
+        (
+            "optimized_makespan",
+            DivisionPlan::uniform(
+                3,
+                DivisionPattern::Optimized {
+                    objective: OptimizeObjective::Makespan,
+                },
+                Balance::ByLength,
+            ),
+        ),
+    ];
+
+    for (mode_name, plan) in scenarios {
         let mut planner = Maptrax::new();
         planner.set_field_object(field.clone());
         let planned = planner.plan_machines_for_part(
-            &MachinePlanningOptions {
-                machines: 3,
-                division_type,
-                part_index: 0,
-            },
+            &MachinePlanningOptions { plan, part_index: 0 },
             &ObstaclePlanningOptions {
                 obstacles: vec![obstacle.clone()],
                 inflation_distance: 2.0,
@@ -80,9 +107,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         )?;
 
+        if let Some(pattern) = planned.division.pattern_used {
+            println!("{mode_name} resolved pattern: {:?}", pattern);
+        }
+
         for machine in &planned.machines {
             let color = rerun_viz::machine_color(machine.machine_index);
-            let mode_name = division_name(division_type);
             let layers = example_scenes::split_tour_layers(&machine.tour);
             rerun_viz::log_swaths_tinted(
                 &rec,
@@ -114,13 +144,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?;
             rerun_viz::log_swaths_tinted(
                 &rec,
-                &format!("enu/main/{mode_name}/swaths/machine_{}", machine.machine_index),
+                &format!(
+                    "enu/main/{mode_name}/swaths/machine_{}",
+                    machine.machine_index
+                ),
                 &layers.work,
                 color,
             )?;
             rerun_viz::log_swaths_geo_tinted(
                 &rec,
-                &format!("geo/main/{mode_name}/swaths/machine_{}", machine.machine_index),
+                &format!(
+                    "geo/main/{mode_name}/swaths/machine_{}",
+                    machine.machine_index
+                ),
                 &layers.work,
                 datum,
                 Some(color),
@@ -134,16 +170,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &layers.row_to_headland,
                 (220, 60, 60),
             )?;
-            rerun_viz::log_swaths_geo_tinted(
-                &rec,
-                &format!(
-                    "geo/main/{mode_name}/turners/row_to_headland/machine_{}",
-                    machine.machine_index
-                ),
-                &layers.row_to_headland,
-                datum,
-                Some((220, 60, 60)),
-            )?;
             rerun_viz::log_swaths_tinted(
                 &rec,
                 &format!(
@@ -152,16 +178,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ),
                 &layers.headland_travel,
                 (255, 170, 0),
-            )?;
-            rerun_viz::log_swaths_geo_tinted(
-                &rec,
-                &format!(
-                    "geo/main/{mode_name}/turners/headland_travel/machine_{}",
-                    machine.machine_index
-                ),
-                &layers.headland_travel,
-                datum,
-                Some((255, 170, 0)),
             )?;
             rerun_viz::log_swaths_tinted(
                 &rec,
@@ -172,16 +188,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &layers.headland_to_row,
                 (70, 190, 90),
             )?;
-            rerun_viz::log_swaths_geo_tinted(
-                &rec,
-                &format!(
-                    "geo/main/{mode_name}/turners/headland_to_row/machine_{}",
-                    machine.machine_index
-                ),
-                &layers.headland_to_row,
-                datum,
-                Some((70, 190, 90)),
-            )?;
             rerun_viz::log_swaths_tinted(
                 &rec,
                 &format!(
@@ -191,37 +197,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &layers.direct,
                 (120, 180, 220),
             )?;
-            rerun_viz::log_swaths_geo_tinted(
-                &rec,
-                &format!(
-                    "geo/main/{mode_name}/turners/direct/machine_{}",
-                    machine.machine_index
-                ),
-                &layers.direct,
-                datum,
-                Some((120, 180, 220)),
-            )?;
             println!(
-                "{} machine {}: assigned={}, avoided={}, ordered={}, tour={}",
-                mode_name,
+                "  {mode_name} machine {}: assigned={}, avoided={}, ordered={}, tour={}, work_s={:.1}, transit_m={:.1}",
                 machine.machine_index,
                 machine.assigned_swaths.len(),
                 machine.avoided_swaths.len(),
                 machine.ordered_swaths.len(),
-                machine.tour.len()
+                machine.tour.len(),
+                planned
+                    .division
+                    .estimated_work_time
+                    .get(machine.machine_index)
+                    .copied()
+                    .unwrap_or(0.0),
+                planned
+                    .division
+                    .estimated_transit
+                    .get(machine.machine_index)
+                    .copied()
+                    .unwrap_or(0.0),
             );
         }
     }
 
     rec.flush_blocking()?;
     Ok(())
-}
-
-fn division_name(division_type: DivisionType) -> &'static str {
-    match division_type {
-        DivisionType::Alternate => "alternate",
-        DivisionType::Block => "block",
-        DivisionType::SpatialRtree => "spatial_rtree",
-        DivisionType::LengthBalanced => "length_balanced",
-    }
 }

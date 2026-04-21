@@ -8,7 +8,7 @@ use graphix::vertex::{
 };
 
 use crate::core::{aabb_from_points, point_distance, segment_end, segment_length, segment_start};
-use crate::field::{Swath, SwathType};
+use crate::field::{Swath, SwathType, canonical_swath_order, dominant_swath_tangent};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ABLine {
@@ -317,36 +317,12 @@ impl Nety {
     }
 
     fn pattern_order(&self, start_point: Point, strategy: RoutingStrategy) -> Vec<Swath> {
-        let tangent = dominant_tangent(&self.swaths);
-        let normal = (-tangent.1, tangent.0);
-        let mut indexed = self
-            .swaths
-            .iter()
-            .enumerate()
-            .map(|(index, swath)| {
-                let center = Point::new(
-                    (swath.head().x() + swath.tail().x()) * 0.5,
-                    (swath.head().y() + swath.tail().y()) * 0.5,
-                );
-                let lateral = center.x() * normal.0 + center.y() * normal.1;
-                let along = center.x() * tangent.0 + center.y() * tangent.1;
-                (index, lateral, along)
-            })
-            .collect::<Vec<_>>();
-        indexed.sort_by(|a, b| {
-            a.1.partial_cmp(&b.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
-                .then_with(|| a.0.cmp(&b.0))
-        });
+        let tangent = dominant_swath_tangent(&self.swaths);
+        let canonical = canonical_swath_order(&self.swaths);
 
         let ordered_indices = match strategy {
-            RoutingStrategy::Snake => snake_indices(indexed.iter().map(|item| item.0).collect()),
-            RoutingStrategy::Spiral => spiral_indices(
-                indexed.iter().map(|item| item.0).collect(),
-                start_point,
-                &self.swaths,
-            ),
+            RoutingStrategy::Snake => snake_indices(canonical),
+            RoutingStrategy::Spiral => spiral_indices(canonical, start_point, &self.swaths),
             RoutingStrategy::GreedyNearest => unreachable!(),
         };
 
@@ -389,21 +365,6 @@ fn build_connection_augmented_order(traversal: Vec<Swath>) -> Vec<Swath> {
         }
     }
     ordered
-}
-
-fn dominant_tangent(swaths: &[Swath]) -> (f64, f64) {
-    let mut tx = 0.0;
-    let mut ty = 0.0;
-    for swath in swaths {
-        tx += swath.tail().x() - swath.head().x();
-        ty += swath.tail().y() - swath.head().y();
-    }
-    let len = (tx * tx + ty * ty).sqrt();
-    if len < 1e-9 {
-        (1.0, 0.0)
-    } else {
-        (tx / len, ty / len)
-    }
 }
 
 fn direction_dot(swath: &Swath, tangent: (f64, f64)) -> f64 {

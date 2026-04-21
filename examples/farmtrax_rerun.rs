@@ -4,8 +4,8 @@ mod example_scenes;
 mod rerun_viz;
 
 use maptrax::{
-    DivisionType, Field, MachinePlanningOptions, Maptrax, ObstacleAvoider, RoutingOptions,
-    RoutingStrategy, TurnPlannerConfig, TurnPlannerModel,
+    Balance, DivisionPattern, DivisionPlan, Field, MachinePlanningOptions, Maptrax,
+    ObstacleAvoider, RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel,
 };
 use rerun::Color;
 
@@ -75,8 +75,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     planner.set_field_object(field.clone());
     let machine_plan = planner.plan_machines_for_part(
         &MachinePlanningOptions {
-            machines: 4,
-            division_type: DivisionType::Alternate,
+            plan: DivisionPlan::uniform(
+                4,
+                DivisionPattern::Stripe { stride: 1 },
+                Balance::ByCount,
+            ),
             part_index: 0,
         },
         &maptrax::ObstaclePlanningOptions {

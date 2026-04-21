@@ -1,0 +1,126 @@
+//! Demo of STRIPED multi-machine division: rows are handed out one at a time
+//! to each machine in turn (machine 0 gets row 0, machine 1 gets row 1, ...).
+//! Fair work, scattered assignment, high transit.
+//!
+//! Run with:
+//!   cargo run --example machine_stripe
+
+#[path = "support/example_scenes.rs"]
+mod example_scenes;
+#[path = "support/rerun_viz.rs"]
+mod rerun_viz;
+
+use maptrax::{
+    Balance, DivisionPattern, DivisionPlan, Field, MachinePlanningOptions, Maptrax,
+    ObstaclePlanningOptions, RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel,
+    segment_length,
+};
+use rerun::Color;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let rec = rerun_viz::connect("maptrax_stripe")?;
+    let datum = example_scenes::upstream_datum();
+    let border = example_scenes::upstream_field_polygon(datum);
+    let obstacle = example_scenes::centered_obstacle(&border, 25.0);
+
+    let mut field = Field::new(border.clone(), datum)?;
+    field.gen_field(4.0, 0.0, 3)?;
+
+    rerun_viz::log_polygon(
+        &rec,
+        "enu/field/border",
+        &border,
+        Color::from_rgb(120, 70, 70),
+    )?;
+    rerun_viz::log_polygon(
+        &rec,
+        "enu/field/obstacle",
+        &obstacle,
+        Color::from_rgb(220, 40, 40),
+    )?;
+
+    let mut planner = Maptrax::new();
+    planner.set_field_object(field.clone());
+    let planned = planner.plan_machines_for_part(
+        &MachinePlanningOptions {
+            plan: DivisionPlan::uniform(
+                3,
+                DivisionPattern::Stripe { stride: 1 },
+                Balance::ByCount,
+            ),
+            part_index: 0,
+        },
+        &ObstaclePlanningOptions {
+            obstacles: vec![obstacle.clone()],
+            inflation_distance: 2.0,
+        },
+        RoutingOptions {
+            strategy: RoutingStrategy::GreedyNearest,
+            local_improvement_passes: 1,
+        },
+        &TurnPlannerConfig {
+            swath_width: 4.0,
+            min_turning_radius: 2.0,
+            model: TurnPlannerModel::ReedsShepp,
+            machine_length: 6.0,
+            machine_width: 3.0,
+            ..TurnPlannerConfig::default()
+        },
+    )?;
+
+    println!("=== Stripe {{ stride: 1 }} + ByCount — 3 machines ===");
+    println!("   Each machine takes every 3rd row; work is fair, transit is high.\n");
+    println!(
+        "   {:<8} {:>8}  {:>10}  {:>10}  {:>10}",
+        "machine", "swaths", "work_len", "work_s", "transit_m"
+    );
+    let mut max_time = 0.0f64;
+    let mut total_transit = 0.0;
+    for machine in &planned.machines {
+        let color = rerun_viz::machine_color(machine.machine_index);
+        rerun_viz::log_swaths_tinted(
+            &rec,
+            &format!("enu/assigned/machine_{}", machine.machine_index),
+            &machine.assigned_swaths,
+            color,
+        )?;
+        rerun_viz::log_swaths_tinted(
+            &rec,
+            &format!("enu/tour/machine_{}", machine.machine_index),
+            &machine.tour,
+            color,
+        )?;
+
+        let work_len: f64 = machine
+            .assigned_swaths
+            .iter()
+            .map(|s| segment_length(s.line))
+            .sum();
+        let work_s = planned
+            .division
+            .estimated_work_time
+            .get(machine.machine_index)
+            .copied()
+            .unwrap_or(0.0);
+        let transit = planned
+            .division
+            .estimated_transit
+            .get(machine.machine_index)
+            .copied()
+            .unwrap_or(0.0);
+        println!(
+            "   {:<8} {:>8}  {:>10.1}  {:>10.1}  {:>10.1}",
+            machine.machine_index,
+            machine.assigned_swaths.len(),
+            work_len,
+            work_s,
+            transit,
+        );
+        max_time = max_time.max(work_s);
+        total_transit += transit;
+    }
+    println!("\n   makespan: {max_time:.1}s   total transit: {total_transit:.1}m");
+
+    rec.flush_blocking()?;
+    Ok(())
+}

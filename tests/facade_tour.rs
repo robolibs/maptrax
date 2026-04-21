@@ -1,10 +1,11 @@
 use concord::Geo;
 use geo::{Point, Polygon};
 use maptrax::{
-    ConnectorMode, DecompositionMode, DivisionType, FieldGenerationMode, FieldGenerationOptions,
-    Maptrax, Nety, ObstacleAvoider, ObstaclePlanningOptions, Part, PlannerOptions, RoutingOptions,
-    RoutingStrategy, SwathAngleSearchOptions, SwathObjective, SwathType, TourBuilder,
-    TurnPlannerConfig, TurnPlannerModel, create_ring, create_swath, polygon_from_points,
+    Balance, ConnectorMode, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode,
+    FieldGenerationOptions, Maptrax, Nety, ObstacleAvoider, ObstaclePlanningOptions, Part,
+    PlannerOptions, RoutingOptions, RoutingStrategy, SwathAngleSearchOptions, SwathObjective,
+    SwathType, TourBuilder, TurnPlannerConfig, TurnPlannerModel, create_ring, create_swath,
+    polygon_from_points,
 };
 
 fn test_polygon() -> Polygon {
@@ -131,11 +132,13 @@ fn facade_end_to_end_flow_works() {
     assert!(!mt.field().unwrap().get_parts().is_empty());
     assert!(!mt.field().unwrap().get_parts()[0].swaths.is_empty());
 
-    let mut divy = mt
-        .make_divy(DivisionType::Alternate, 2, 0)
-        .expect("make divy");
-    divy.compute_division();
-    assert!(!divy.result().swaths_per_machine.is_empty());
+    let division = mt
+        .divide_part(
+            0,
+            &DivisionPlan::uniform(2, DivisionPattern::Stripe { stride: 1 }, Balance::ByCount),
+        )
+        .expect("divide part");
+    assert!(!division.swaths_per_machine.is_empty());
 
     let obstacle = polygon_from_points(vec![
         Point::new(45.0, 20.0),

@@ -1,8 +1,9 @@
 use concord::{Geo, Wgs, to_enu};
 use geo::{Point, Polygon};
 use maptrax::{
-    DecompositionMode, DivisionType, FieldGenerationMode, FieldGenerationOptions,
-    MachinePlanningOptions, Maptrax, ObstaclePlanningOptions, PlannerOptions, RoutingOptions,
+    Balance, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode,
+    FieldGenerationOptions, MachinePlanningOptions, Maptrax, ObstaclePlanningOptions,
+    OptimizeObjective, PlannerOptions, RoutingOptions,
     RoutingStrategy, Swath, SwathType, TurnPlannerConfig, point_distance, polygon_from_points,
 };
 
@@ -306,17 +307,28 @@ fn machine_planning_covers_all_division_modes() {
     planner.generate_field(8.0, 0.0, 2).expect("generate");
     let original_swaths = planner.field().unwrap().get_parts()[0].swaths.len();
 
-    for division_type in [
-        DivisionType::Alternate,
-        DivisionType::Block,
-        DivisionType::SpatialRtree,
-        DivisionType::LengthBalanced,
-    ] {
+    let plans = [
+        DivisionPlan::uniform(3, DivisionPattern::Stripe { stride: 1 }, Balance::ByCount),
+        DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByCount),
+        DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByLength),
+        DivisionPlan::uniform(
+            3,
+            DivisionPattern::BandedStripe { bands: 2 },
+            Balance::ByLength,
+        ),
+        DivisionPlan::uniform(
+            3,
+            DivisionPattern::Optimized {
+                objective: OptimizeObjective::Makespan,
+            },
+            Balance::ByLength,
+        ),
+    ];
+    for plan in plans {
         let planned = planner
             .plan_machines_for_part(
                 &MachinePlanningOptions {
-                    machines: 3,
-                    division_type,
+                    plan,
                     part_index: 0,
                 },
                 &ObstaclePlanningOptions {
@@ -362,8 +374,11 @@ fn upstream_example_surface_remains_visually_sane() {
     let machine_plan = planner
         .plan_machines_for_part(
             &MachinePlanningOptions {
-                machines: 4,
-                division_type: DivisionType::Alternate,
+                plan: DivisionPlan::uniform(
+                    4,
+                    DivisionPattern::Stripe { stride: 1 },
+                    Balance::ByCount,
+                ),
                 part_index: 0,
             },
             &ObstaclePlanningOptions {
@@ -397,8 +412,11 @@ fn upstream_example_surface_remains_visually_sane() {
     let machine_plan = planner
         .plan_machines_for_part(
             &MachinePlanningOptions {
-                machines: 4,
-                division_type: DivisionType::Alternate,
+                plan: DivisionPlan::uniform(
+                    4,
+                    DivisionPattern::Stripe { stride: 1 },
+                    Balance::ByCount,
+                ),
                 part_index: 0,
             },
             &ObstaclePlanningOptions {

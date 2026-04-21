@@ -18,7 +18,11 @@ pub use core::{
     point_to_line_distance, points_equal, polygon_area, polygon_from_points,
     remove_colinear_points, segment_length,
 };
-pub use division::{DivisionResult, DivisionType, Divy};
+pub use division::{
+    Balance, DivisionPattern, DivisionPlan, DivisionResult, Divy, MachineProfile,
+    OptimizeObjective,
+};
+pub use field::canonical_swath_order;
 pub use facade::{
     FieldGenerationMode, FieldGenerationOptions, MachinePlannedPart, MachinePlanningOptions,
     Maptrax, ObstaclePlanningOptions, PlannedField, PlannedFieldStages, PlannedMachines,

@@ -1,3 +1,6 @@
 mod divy;
 
-pub use divy::{DivisionResult, DivisionType, Divy};
+pub use divy::{
+    Balance, DivisionPattern, DivisionPlan, DivisionResult, Divy, MachineProfile,
+    OptimizeObjective,
+};

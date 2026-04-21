@@ -4,9 +4,10 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 
 use crate::{
-    ConnectorMode, DecompositionMode, DivisionType, Geo, MachinePlanningOptions, Maptrax,
-    ObstaclePlanningOptions, Pose2D, RoutingOptions, RoutingStrategy, TurnPlannerConfig,
-    TurnPlannerModel, polygon_from_points,
+    Balance, ConnectorMode, DecompositionMode, DivisionPattern, DivisionPlan, Geo,
+    MachinePlanningOptions, MachineProfile, Maptrax, ObstaclePlanningOptions, OptimizeObjective,
+    Pose2D, RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel,
+    polygon_from_points,
 };
 
 fn py_err(err: crate::MaptraxError) -> PyErr {
@@ -47,15 +48,58 @@ fn parse_connector_mode(name: &str) -> PyResult<ConnectorMode> {
     }
 }
 
-fn parse_division_type(name: &str) -> PyResult<DivisionType> {
+fn parse_pattern(name: &str, stride: usize, bands: usize) -> PyResult<DivisionPattern> {
     match name {
-        "alternate" => Ok(DivisionType::Alternate),
-        "block" => Ok(DivisionType::Block),
-        "spatial_rtree" | "spatial-rtree" => Ok(DivisionType::SpatialRtree),
-        "length_balanced" | "length-balanced" => Ok(DivisionType::LengthBalanced),
+        "stripe" | "alternate" => Ok(DivisionPattern::Stripe {
+            stride: stride.max(1),
+        }),
+        "block" => Ok(DivisionPattern::Block),
+        "banded_stripe" | "banded-stripe" | "banded" => Ok(DivisionPattern::BandedStripe {
+            bands: bands.max(1),
+        }),
+        "optimized_makespan" | "optimized" => Ok(DivisionPattern::Optimized {
+            objective: OptimizeObjective::Makespan,
+        }),
+        "optimized_transit" => Ok(DivisionPattern::Optimized {
+            objective: OptimizeObjective::TotalTransit,
+        }),
         other => Err(PyValueError::new_err(format!(
-            "unknown division type: {other}"
+            "unknown division pattern: {other}"
         ))),
+    }
+}
+
+fn parse_balance(name: &str) -> PyResult<Balance> {
+    match name {
+        "count" | "by_count" | "by-count" => Ok(Balance::ByCount),
+        "length" | "by_length" | "by-length" => Ok(Balance::ByLength),
+        other => Err(PyValueError::new_err(format!(
+            "unknown balance: {other}"
+        ))),
+    }
+}
+
+fn build_machine_profiles(
+    machines: usize,
+    profiles: Option<Vec<(f64, f64)>>,
+) -> PyResult<Vec<MachineProfile>> {
+    if let Some(list) = profiles {
+        if list.len() != machines {
+            return Err(PyValueError::new_err(format!(
+                "expected {} machine profiles, got {}",
+                machines,
+                list.len()
+            )));
+        }
+        Ok(list
+            .into_iter()
+            .map(|(weight, speed)| MachineProfile {
+                weight: if weight > 0.0 { weight } else { 1.0 },
+                speed: if speed > 0.0 { speed } else { 1.0 },
+            })
+            .collect())
+    } else {
+        Ok(MachineProfile::uniform(machines))
     }
 }
 
@@ -143,6 +187,12 @@ fn machine_part_to_dict<'py>(
         assigned.append(swath_to_dict(py, swath)?)?;
     }
     dict.set_item("assigned_swaths", assigned)?;
+
+    let assigned_headlands = PyList::empty(py);
+    for ring in &machine_plan.assigned_headlands {
+        assigned_headlands.append(ring_to_dict(py, ring)?)?;
+    }
+    dict.set_item("assigned_headlands", assigned_headlands)?;
 
     let avoided = PyList::empty(py);
     for swath in &machine_plan.avoided_swaths {
@@ -522,7 +572,11 @@ impl PyMaptrax {
     #[pyo3(signature = (
         part_index=0,
         machines=1,
-        division_type="alternate",
+        pattern="block",
+        balance="count",
+        stride=1,
+        bands=2,
+        machine_profiles=None,
         obstacle_polygons=Vec::<Vec<(f64, f64)>>::new(),
         inflation_distance=0.0,
         routing_strategy="greedy_nearest",
@@ -540,7 +594,11 @@ impl PyMaptrax {
         py: Python<'py>,
         part_index: usize,
         machines: usize,
-        division_type: &str,
+        pattern: &str,
+        balance: &str,
+        stride: usize,
+        bands: usize,
+        machine_profiles: Option<Vec<(f64, f64)>>,
         obstacle_polygons: Vec<Vec<(f64, f64)>>,
         inflation_distance: f64,
         routing_strategy: &str,
@@ -558,14 +616,15 @@ impl PyMaptrax {
             .map(polygon_from_xy)
             .collect::<crate::Result<Vec<_>>>()
             .map_err(py_err)?;
+        let plan = DivisionPlan {
+            pattern: parse_pattern(pattern, stride, bands)?,
+            balance: parse_balance(balance)?,
+            machines: build_machine_profiles(machines, machine_profiles)?,
+        };
         let planned = self
             .inner
             .plan_machines_for_part(
-                &MachinePlanningOptions {
-                    machines,
-                    division_type: parse_division_type(division_type)?,
-                    part_index,
-                },
+                &MachinePlanningOptions { plan, part_index },
                 &ObstaclePlanningOptions {
                     obstacles,
                     inflation_distance,
@@ -589,6 +648,14 @@ impl PyMaptrax {
 
         let dict = PyDict::new(py);
         dict.set_item("part_index", planned.part_index)?;
+        dict.set_item(
+            "estimated_work_time",
+            planned.division.estimated_work_time.clone(),
+        )?;
+        dict.set_item(
+            "estimated_transit",
+            planned.division.estimated_transit.clone(),
+        )?;
         let machine_list = PyList::empty(py);
         for machine in &planned.machines {
             machine_list.append(machine_part_to_dict(py, machine)?)?;

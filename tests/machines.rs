@@ -1,9 +1,13 @@
 use concord::{Geo, Wgs, to_enu};
 use geo::Point;
 use maptrax::{
-    DivisionType, MachinePlanningOptions, Maptrax, ObstaclePlanningOptions, RoutingOptions,
-    RoutingStrategy, SwathType, TurnPlannerConfig, polygon_from_points,
+    Balance, DivisionPattern, DivisionPlan, MachinePlanningOptions, Maptrax, ObstaclePlanningOptions,
+    RoutingOptions, RoutingStrategy, SwathType, TurnPlannerConfig, polygon_from_points,
 };
+
+fn stripe_1_by_count(machines: usize) -> DivisionPlan {
+    DivisionPlan::uniform(machines, DivisionPattern::Stripe { stride: 1 }, Balance::ByCount)
+}
 
 fn rectangular_polygon() -> geo::Polygon<f64> {
     polygon_from_points(vec![
@@ -69,8 +73,7 @@ fn machine_planning_preserves_assigned_swath_totals() {
     let planned = mt
         .plan_machines_for_part(
             &MachinePlanningOptions {
-                machines: 3,
-                division_type: DivisionType::Alternate,
+                plan: stripe_1_by_count(3),
                 part_index: 0,
             },
             &ObstaclePlanningOptions::default(),
@@ -111,8 +114,7 @@ fn machine_planning_tracks_assigned_avoided_routed_flow() {
     let planned = mt
         .plan_machines_for_part(
             &MachinePlanningOptions {
-                machines: 2,
-                division_type: DivisionType::Alternate,
+                plan: stripe_1_by_count(2),
                 part_index: 0,
             },
             &ObstaclePlanningOptions {
@@ -160,8 +162,7 @@ fn upstream_machine_fixture_counts_remain_stable() {
     let planned = mt
         .plan_machines_for_part(
             &MachinePlanningOptions {
-                machines: 4,
-                division_type: DivisionType::Alternate,
+                plan: stripe_1_by_count(4),
                 part_index: 0,
             },
             &ObstaclePlanningOptions {

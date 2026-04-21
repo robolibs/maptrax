@@ -325,6 +325,50 @@ impl Field {
     }
 }
 
+/// Average tangent direction of a swath set (unit-length). Falls back to
+/// (1, 0) if the swaths cancel out or are empty.
+pub fn dominant_swath_tangent(swaths: &[Swath]) -> (f64, f64) {
+    let mut tx = 0.0;
+    let mut ty = 0.0;
+    for swath in swaths {
+        tx += swath.tail().x() - swath.head().x();
+        ty += swath.tail().y() - swath.head().y();
+    }
+    let len = (tx * tx + ty * ty).sqrt();
+    if len < 1e-9 {
+        (1.0, 0.0)
+    } else {
+        (tx / len, ty / len)
+    }
+}
+
+/// Return swath indices sorted in canonical row order. Primary key: lateral
+/// offset (centre projected onto the dominant-tangent normal) — this is "which
+/// row". Secondary key: along-tangent offset for swaths that share a row.
+/// Tertiary key: original index (stable, deterministic).
+pub fn canonical_swath_order(swaths: &[Swath]) -> Vec<usize> {
+    let tangent = dominant_swath_tangent(swaths);
+    let normal = (-tangent.1, tangent.0);
+    let mut indexed: Vec<(usize, f64, f64)> = swaths
+        .iter()
+        .enumerate()
+        .map(|(index, swath)| {
+            let cx = (swath.head().x() + swath.tail().x()) * 0.5;
+            let cy = (swath.head().y() + swath.tail().y()) * 0.5;
+            let lateral = cx * normal.0 + cy * normal.1;
+            let along = cx * tangent.0 + cy * tangent.1;
+            (index, lateral, along)
+        })
+        .collect();
+    indexed.sort_by(|a, b| {
+        a.1.partial_cmp(&b.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    indexed.into_iter().map(|(i, _, _)| i).collect()
+}
+
 pub fn generate_headlands_for_polygon(
     border: &Polygon,
     swath_width: f64,

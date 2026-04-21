@@ -3,7 +3,7 @@ use geo::Polygon;
 
 use crate::avoid::ObstacleAvoider;
 use crate::core::{MaptraxError, Result};
-use crate::division::{DivisionType, Divy};
+use crate::division::{DivisionPlan, Divy};
 use crate::field::{
     DecompositionMode, Field, Part, Ring, Swath, SwathAngleSearchOptions, SwathAngleSearchResult,
     SwathObjective, create_ring,
@@ -115,16 +115,18 @@ pub struct PlannedFieldStages {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MachinePlanningOptions {
-    pub machines: usize,
-    pub division_type: DivisionType,
+    pub plan: DivisionPlan,
     pub part_index: usize,
 }
 
 impl Default for MachinePlanningOptions {
     fn default() -> Self {
         Self {
-            machines: 1,
-            division_type: DivisionType::Alternate,
+            plan: DivisionPlan::uniform(
+                1,
+                crate::division::DivisionPattern::Block,
+                crate::division::Balance::ByCount,
+            ),
             part_index: 0,
         }
     }
@@ -134,6 +136,7 @@ impl Default for MachinePlanningOptions {
 pub struct MachinePlannedPart {
     pub machine_index: usize,
     pub assigned_swaths: Vec<Swath>,
+    pub assigned_headlands: Vec<Ring>,
     pub avoided_swaths: Vec<Swath>,
     pub ordered_swaths: Vec<Swath>,
     pub tour: Vec<Swath>,
@@ -197,14 +200,15 @@ impl Maptrax {
         self.field_mut()?.decompose(mode)
     }
 
-    pub fn make_divy(
+    /// Run the division planner on the given part and return the raw result.
+    /// For a full per-machine plan (routing + tour), use `plan_machines_for_part`.
+    pub fn divide_part(
         &self,
-        division_type: DivisionType,
-        machines: usize,
         part_index: usize,
-    ) -> Result<Divy> {
-        let part = self.field()?.part(part_index)?.clone();
-        Divy::from_part(part, division_type, machines)
+        plan: &DivisionPlan,
+    ) -> Result<crate::division::DivisionResult> {
+        let part = self.field()?.part(part_index)?;
+        Divy::plan(part, plan)
     }
 
     pub fn make_nety_from_part(&self, part_index: usize) -> Result<Nety> {
@@ -411,12 +415,23 @@ impl Maptrax {
     ) -> Result<PlannedMachines> {
         let field = self.field()?;
         let part = field.part(options.part_index)?.clone();
-        let mut divy = Divy::from_part(part.clone(), options.division_type, options.machines)?;
-        divy.compute_division();
+        let division = Divy::plan(&part, &options.plan)?;
 
-        let mut machines = Vec::with_capacity(options.machines);
-        for (machine_index, assigned_swaths) in divy.result().swaths_per_machine.iter().enumerate()
-        {
+        let machine_count = options.plan.machine_count();
+        let mut machines = Vec::with_capacity(machine_count);
+        let empty_headlands: Vec<Ring> = Vec::new();
+        for machine_index in 0..machine_count {
+            let assigned_swaths = division
+                .swaths_per_machine
+                .get(machine_index)
+                .cloned()
+                .unwrap_or_default();
+            let assigned_headlands = division
+                .headlands_per_machine
+                .get(machine_index)
+                .cloned()
+                .unwrap_or_else(|| empty_headlands.clone());
+
             let avoided_swaths = if obstacle_options.obstacles.is_empty() {
                 assigned_swaths.clone()
             } else {
@@ -424,7 +439,7 @@ impl Maptrax {
                     ObstacleAvoider::new(obstacle_options.obstacles.clone(), field.datum());
                 avoider.set_field_boundary(part.boundary.polygon.clone());
                 avoider.avoid(
-                    assigned_swaths,
+                    &assigned_swaths,
                     obstacle_clearance_distance(
                         part.swaths.first().map(|swath| swath.width).unwrap_or(turn.swath_width),
                         obstacle_options.inflation_distance,
@@ -450,7 +465,8 @@ impl Maptrax {
 
             machines.push(MachinePlannedPart {
                 machine_index,
-                assigned_swaths: assigned_swaths.clone(),
+                assigned_swaths,
+                assigned_headlands,
                 avoided_swaths,
                 ordered_swaths,
                 tour,
@@ -459,7 +475,7 @@ impl Maptrax {
 
         Ok(PlannedMachines {
             part_index: options.part_index,
-            division: divy.result().clone(),
+            division,
             machines,
         })
     }

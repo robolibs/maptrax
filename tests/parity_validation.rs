@@ -1,9 +1,14 @@
 use concord::{Geo, Wgs, to_enu};
 use geo::{Point, Polygon};
 use maptrax::{
-    DivisionType, Divy, Dubins, Field, Maptrax, Nety, ObstacleAvoider, Pose2D, ReedsShepp, Sharper,
-    SwathType, TourBuilder, TurnPlannerConfig, create_swath, polygon_from_points,
+    Balance, DivisionPattern, DivisionPlan, Divy, Dubins, Field, Maptrax, Nety, ObstacleAvoider,
+    Pose2D, ReedsShepp, Sharper, SwathType, TourBuilder, TurnPlannerConfig, create_swath,
+    polygon_from_points,
 };
+
+fn stripe_plan(machines: usize) -> DivisionPlan {
+    DivisionPlan::uniform(machines, DivisionPattern::Stripe { stride: 1 }, Balance::ByCount)
+}
 
 fn rect() -> Polygon {
     polygon_from_points(vec![
@@ -24,10 +29,9 @@ fn upstream_test_surface_has_rust_parity_coverage() {
     field.gen_field(10.0, 90.0, 1).expect("generated");
     assert!(!field.get_parts()[0].swaths.is_empty());
 
-    let mut divy = Divy::from_field(&field, DivisionType::Alternate, 2).expect("divy");
-    divy.compute_division();
+    let result = Divy::plan(&field.get_parts()[0], &stripe_plan(2)).expect("divy");
     assert_eq!(
-        divy.result()
+        result
             .swaths_per_machine
             .iter()
             .map(Vec::len)
@@ -212,13 +216,8 @@ fn upstream_main_cpp_flow_matches_probe_counts() {
         Point::new(center_x - 25.0, center_y + 25.0),
     ]);
 
-    let mut divy = Divy::from_field(&field, DivisionType::Alternate, 2).expect("divy");
-    divy.compute_division();
-    divy.set_machine_count(4).expect("set machine count");
-    divy.compute_division();
-
-    let assigned: Vec<usize> = divy
-        .result()
+    let division = Divy::plan(&field.get_parts()[0], &stripe_plan(4)).expect("divy");
+    let assigned: Vec<usize> = division
         .swaths_per_machine
         .iter()
         .map(Vec::len)
@@ -277,21 +276,15 @@ fn machine_specific_example_flow_counts_are_stable() {
         Point::new(center_x - 25.0, center_y + 25.0),
     ]);
 
-    let mut divy = Divy::from_field(&field, DivisionType::Alternate, 2).expect("divy");
-    divy.compute_division();
-    divy.set_machine_count(4).expect("set machine count");
-    divy.compute_division();
-
-    let assigned: Vec<usize> = divy
-        .result()
+    let division = Divy::plan(&field.get_parts()[0], &stripe_plan(4)).expect("divy");
+    let assigned: Vec<usize> = division
         .swaths_per_machine
         .iter()
         .map(Vec::len)
         .collect();
     assert_eq!(assigned, vec![18, 18, 18, 17]);
 
-    let assigned_avoided: Vec<usize> = divy
-        .result()
+    let assigned_avoided: Vec<usize> = division
         .swaths_per_machine
         .iter()
         .map(|swaths| {
@@ -299,5 +292,5 @@ fn machine_specific_example_flow_counts_are_stable() {
             avoider.avoid(swaths, 2.0).len()
         })
         .collect();
-    assert_eq!(assigned_avoided, vec![23, 23, 22, 21]);
+    assert_eq!(assigned_avoided, vec![22, 23, 23, 21]);
 }
