@@ -670,8 +670,9 @@ dependencies = [
 [[package]]
 name = "concord"
 version = "0.0.1"
+source = "git+https://codeberg.org/robolibs/concord.git#895e4316c848650e6793c6fc67dfec4b7b954320"
 dependencies = [
- "glam",
+ "datapod",
  "graphix",
  "kiddo",
  "rayon",
@@ -898,6 +899,11 @@ dependencies = [
  "generic-array",
  "typenum",
 ]
+
+[[package]]
+name = "datapod"
+version = "0.0.1"
+source = "git+https://codeberg.org/robolibs/datapod.git#b0da2bbaa372bdfe4a50f5150c7f082ae90e008a"
 
 [[package]]
 name = "digest"
@@ -1358,12 +1364,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 
 [[package]]
-name = "glam"
-version = "0.30.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
-
-[[package]]
 name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1372,8 +1372,9 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 [[package]]
 name = "graphix"
 version = "0.0.1"
+source = "git+https://codeberg.org/robolibs/graphix.git#19d74a983dfa9fe75d91fb850d2a822ca531a7e7"
 dependencies = [
- "glam",
+ "datapod",
  "kiddo",
  "rayon",
  "tokio",
