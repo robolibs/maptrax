@@ -5,7 +5,7 @@ mod rerun_viz;
 
 use maptrax::{
     Balance, DivisionPattern, DivisionPlan, Field, MachinePlanningOptions, Maptrax,
-    ObstacleAvoider, RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel,
+    RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel,
 };
 use rerun::Color;
 
@@ -18,10 +18,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut field = Field::new(border.clone(), datum)?;
     field.gen_field(4.0, 0.0, 3)?;
     let part = &field.get_parts()[0];
-
-    let obstacle = example_scenes::centered_obstacle(&border, 25.0);
-    let mut avoider = ObstacleAvoider::new(vec![obstacle.clone()], datum);
-    let avoided = avoider.avoid(&part.swaths, 2.0);
 
     rerun_viz::log_polygon(
         &rec,
@@ -55,21 +51,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     rerun_viz::log_swaths(&rec, "enu/field/swaths", &part.swaths)?;
     rerun_viz::log_swaths_geo(&rec, "geo/field/swaths", &part.swaths, datum)?;
-    rerun_viz::log_polygon(
-        &rec,
-        "enu/avoidance/obstacle",
-        &obstacle,
-        Color::from_rgb(220, 20, 20),
-    )?;
-    rerun_viz::log_polygon_geo(
-        &rec,
-        "geo/avoidance/obstacle",
-        &obstacle,
-        datum,
-        Color::from_rgb(220, 20, 20),
-    )?;
-    rerun_viz::log_swaths(&rec, "enu/avoidance/avoided", &avoided)?;
-    rerun_viz::log_swaths_geo(&rec, "geo/avoidance/avoided", &avoided, datum)?;
 
     let mut planner = Maptrax::new();
     planner.set_field_object(field.clone());
@@ -81,10 +62,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Balance::ByCount,
             ),
             part_index: 0,
-        },
-        &maptrax::ObstaclePlanningOptions {
-            obstacles: vec![obstacle.clone()],
-            inflation_distance: 2.0,
         },
         RoutingOptions {
             strategy: RoutingStrategy::GreedyNearest,
@@ -105,18 +82,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rerun_viz::log_swaths_tinted(
             &rec,
             &format!("enu/division/machine_{machine}"),
-            &machine_plan.avoided_swaths,
+            &machine_plan.assigned_swaths,
             machine_color,
         )?;
         rerun_viz::log_swaths_geo_tinted(
             &rec,
             &format!("geo/division/machine_{machine}"),
-            &machine_plan.avoided_swaths,
+            &machine_plan.assigned_swaths,
             datum,
             Some(machine_color),
         )?;
         if machine_plan.assigned_swaths.is_empty() {
-            machine_summaries.push((machine, 0_usize, 0_usize, 0_usize));
+            machine_summaries.push((machine, 0_usize, 0_usize));
             continue;
         }
 
@@ -136,7 +113,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         machine_summaries.push((
             machine,
             machine_plan.assigned_swaths.len(),
-            machine_plan.avoided_swaths.len(),
             machine_plan.ordered_swaths.len(),
         ));
     }
@@ -144,15 +120,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     rec.flush_blocking()?;
     println!("Field area: {:.1} m^2", field.total_area());
     println!(
-        "Part 0: {} headlands, {} swaths, {} avoided segments",
+        "Part 0: {} headlands, {} swaths",
         part.headlands.len(),
         part.swaths.len(),
-        avoided.len(),
     );
-    for (machine, assigned, assigned_avoided, nety_count) in machine_summaries {
-        println!(
-            "Machine {machine}: assigned={assigned}, assigned_avoided={assigned_avoided}, nety={nety_count}"
-        );
+    for (machine, assigned, ordered) in machine_summaries {
+        println!("Machine {machine}: assigned={assigned}, ordered={ordered}");
     }
     println!(
         "Connected to Rerun at {}",

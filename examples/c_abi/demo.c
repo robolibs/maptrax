@@ -85,10 +85,12 @@ int main(void) {
     return 1;
   }
 
-  MaptraxSwathBufferView avoided = maptrax_stages_result_avoided_view(staged);
-  MaptraxRingBufferView transit = maptrax_stages_result_transit_rings_view(staged);
-  printf("avoided_swaths=%zu\n", avoided.swaths_len);
-  printf("transit_rings=%zu\n", transit.rings_len);
+  MaptraxSwathBufferView staged_generated = maptrax_stages_result_generated_view(staged);
+  MaptraxSwathBufferView staged_ordered = maptrax_stages_result_ordered_view(staged);
+  MaptraxSwathBufferView staged_tour = maptrax_stages_result_tour_view(staged);
+  printf("staged_generated_swaths=%zu\n", staged_generated.swaths_len);
+  printf("staged_ordered_swaths=%zu\n", staged_ordered.swaths_len);
+  printf("staged_tour_swaths=%zu\n", staged_tour.swaths_len);
 
   MaptraxPosePathHandle* rs = maptrax_plan_reeds_shepp(
       (MaptraxPose2){0.0, 0.0, 0.0},

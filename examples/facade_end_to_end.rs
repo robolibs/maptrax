@@ -59,10 +59,9 @@ fn main() {
         .expect("staged plan");
 
     println!(
-        "staged flow: headlands={}, generated={}, avoided={}, ordered={}, tour={}",
+        "staged flow: headlands={}, generated={}, ordered={}, tour={}",
         staged.parts[0].headlands.len(),
         staged.parts[0].generated_swaths.len(),
-        staged.parts[0].avoided_swaths.len(),
         staged.parts[0].ordered_swaths.len(),
         staged.parts[0].tour.len()
     );

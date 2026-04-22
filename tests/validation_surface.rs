@@ -2,9 +2,9 @@ use concord::{Geo, Wgs, to_enu};
 use geo::{Point, Polygon};
 use maptrax::{
     Balance, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode,
-    FieldGenerationOptions, MachinePlanningOptions, Maptrax, ObstaclePlanningOptions,
-    OptimizeObjective, PlannerOptions, RoutingOptions,
-    RoutingStrategy, Swath, SwathType, TurnPlannerConfig, point_distance, polygon_from_points,
+    FieldGenerationOptions, MachinePlanningOptions, Maptrax, OptimizeObjective, PlannerOptions,
+    RoutingOptions, RoutingStrategy, Swath, SwathType, TurnPlannerConfig, point_distance,
+    polygon_from_points,
 };
 
 fn rectangle_polygon() -> Polygon {
@@ -59,37 +59,6 @@ fn upstream_polygon(datum: Geo) -> Polygon {
     )
 }
 
-fn centered_obstacle(border: &Polygon, half_size: f64) -> Polygon {
-    let vertices = border.exterior().points().collect::<Vec<_>>();
-    let (min_x, max_x) = vertices
-        .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, p| {
-            (acc.0.min(p.x()), acc.1.max(p.x()))
-        });
-    let (min_y, max_y) = vertices
-        .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, p| {
-            (acc.0.min(p.y()), acc.1.max(p.y()))
-        });
-    let center_x = (min_x + max_x) * 0.5;
-    let center_y = (min_y + max_y) * 0.5;
-    polygon_from_points(vec![
-        Point::new(center_x - half_size, center_y - half_size),
-        Point::new(center_x + half_size, center_y - half_size),
-        Point::new(center_x + half_size, center_y + half_size),
-        Point::new(center_x - half_size, center_y + half_size),
-    ])
-}
-
-fn shifted_obstacle(center_x: f64, center_y: f64, half_size: f64) -> Polygon {
-    polygon_from_points(vec![
-        Point::new(center_x - half_size, center_y - half_size),
-        Point::new(center_x + half_size, center_y - half_size),
-        Point::new(center_x + half_size, center_y + half_size),
-        Point::new(center_x - half_size, center_y + half_size),
-    ])
-}
-
 fn assert_swaths_are_geometrically_sane(swaths: &[Swath]) {
     assert!(!swaths.is_empty());
     for swath in swaths {
@@ -137,7 +106,6 @@ fn staged_planning_covers_fixture_matrix() {
                 decomposition: DecompositionMode::None,
                 mode: FieldGenerationMode::ExplicitAngle(90.0),
             },
-            ObstaclePlanningOptions::default(),
             datum,
         ),
         (
@@ -149,21 +117,16 @@ fn staged_planning_covers_fixture_matrix() {
                 decomposition: DecompositionMode::None,
                 mode: FieldGenerationMode::ExplicitAngle(0.0),
             },
-            ObstaclePlanningOptions::default(),
             datum,
         ),
         (
-            "concave-with-center-obstacle",
+            "concave-split",
             concave_polygon(),
             FieldGenerationOptions {
                 swath_width: 10.0,
                 headland_count: 1,
                 decomposition: DecompositionMode::ConcaveSplit,
                 mode: FieldGenerationMode::ExplicitAngle(90.0),
-            },
-            ObstaclePlanningOptions {
-                obstacles: vec![centered_obstacle(&concave_polygon(), 8.0)],
-                inflation_distance: 2.0,
             },
             datum,
         ),
@@ -176,15 +139,11 @@ fn staged_planning_covers_fixture_matrix() {
                 decomposition: DecompositionMode::None,
                 mode: FieldGenerationMode::ExplicitAngle(0.0),
             },
-            ObstaclePlanningOptions {
-                obstacles: vec![centered_obstacle(&upstream_polygon(upstream_datum), 25.0)],
-                inflation_distance: 2.0,
-            },
             upstream_datum,
         ),
     ];
 
-    for (name, polygon, field_options, obstacle_options, scenario_datum) in scenarios {
+    for (name, polygon, field_options, scenario_datum) in scenarios {
         let mut planner = Maptrax::new();
         planner.set_field(polygon, scenario_datum).expect("field");
         let planned = planner
@@ -194,7 +153,6 @@ fn staged_planning_covers_fixture_matrix() {
                     strategy: RoutingStrategy::GreedyNearest,
                     local_improvement_passes: 1,
                 },
-                obstacles: obstacle_options,
                 turn: TurnPlannerConfig::default(),
                 ..PlannerOptions::default()
             })
@@ -203,7 +161,6 @@ fn staged_planning_covers_fixture_matrix() {
         assert!(!planned.parts.is_empty(), "{name}: no parts");
         for part in &planned.parts {
             assert_swaths_are_geometrically_sane(&part.generated_swaths);
-            assert_swaths_are_geometrically_sane(&part.avoided_swaths);
             assert_swaths_are_geometrically_sane(&part.ordered_swaths);
             assert_swaths_are_geometrically_sane(&part.tour);
             assert!(!part.tour.is_empty(), "{name}: empty tour");
@@ -241,7 +198,6 @@ fn routing_strategies_preserve_work_across_fixture_matrix() {
                         strategy,
                         local_improvement_passes: 1,
                     },
-                    &ObstaclePlanningOptions::default(),
                 )
                 .expect("ordered");
             assert_eq!(
@@ -258,50 +214,9 @@ fn routing_strategies_preserve_work_across_fixture_matrix() {
 }
 
 #[test]
-fn multiple_obstacles_expand_avoidance_surface() {
-    let datum = Geo::new(51.0, 5.0, 0.0);
-    let polygon = irregular_convex_polygon();
-    let mut planner = Maptrax::new();
-    planner.set_field(polygon, datum).expect("field");
-    planner.generate_field(8.0, 0.0, 2).expect("generate");
-
-    let single = planner
-        .plan_stages_for_part(
-            0,
-            RoutingOptions::default(),
-            &ObstaclePlanningOptions {
-                obstacles: vec![shifted_obstacle(55.0, 45.0, 8.0)],
-                inflation_distance: 2.0,
-            },
-            &TurnPlannerConfig::default(),
-        )
-        .expect("single");
-    let multiple = planner
-        .plan_stages_for_part(
-            0,
-            RoutingOptions::default(),
-            &ObstaclePlanningOptions {
-                obstacles: vec![
-                    shifted_obstacle(40.0, 35.0, 8.0),
-                    shifted_obstacle(85.0, 55.0, 8.0),
-                ],
-                inflation_distance: 2.0,
-            },
-            &TurnPlannerConfig::default(),
-        )
-        .expect("multiple");
-
-    assert!(multiple.transit_rings.len() >= single.transit_rings.len());
-    assert_eq!(single.transit_rings.len(), 1);
-    assert_eq!(multiple.transit_rings.len(), 2);
-    assert_tour_is_connected(&multiple.tour);
-}
-
-#[test]
 fn machine_planning_covers_all_division_modes() {
     let datum = Geo::new(51.0, 5.0, 0.0);
     let polygon = irregular_convex_polygon();
-    let obstacle = centered_obstacle(&polygon, 10.0);
     let mut planner = Maptrax::new();
     planner.set_field(polygon, datum).expect("field");
     planner.generate_field(8.0, 0.0, 2).expect("generate");
@@ -330,10 +245,6 @@ fn machine_planning_covers_all_division_modes() {
                 &MachinePlanningOptions {
                     plan,
                     part_index: 0,
-                },
-                &ObstaclePlanningOptions {
-                    obstacles: vec![obstacle.clone()],
-                    inflation_distance: 2.0,
                 },
                 RoutingOptions {
                     strategy: RoutingStrategy::GreedyNearest,
@@ -367,7 +278,6 @@ fn machine_planning_covers_all_division_modes() {
 fn upstream_example_surface_remains_visually_sane() {
     let datum = Geo::new(51.98954034749562, 5.6584737410504715, 53.801823);
     let polygon = upstream_polygon(datum);
-    let obstacle = centered_obstacle(&polygon, 25.0);
 
     let mut planner = Maptrax::new();
     planner.set_field(polygon, datum).expect("field");
@@ -380,10 +290,6 @@ fn upstream_example_surface_remains_visually_sane() {
                     Balance::ByCount,
                 ),
                 part_index: 0,
-            },
-            &ObstaclePlanningOptions {
-                obstacles: vec![obstacle],
-                inflation_distance: 2.0,
             },
             RoutingOptions {
                 strategy: RoutingStrategy::GreedyNearest,
@@ -403,7 +309,6 @@ fn upstream_example_surface_remains_visually_sane() {
             .machines
             .iter()
             .all(|machine| machine.assigned_swaths.is_empty()
-                && machine.avoided_swaths.is_empty()
                 && machine.ordered_swaths.is_empty()
                 && machine.tour.is_empty())
     );
@@ -418,10 +323,6 @@ fn upstream_example_surface_remains_visually_sane() {
                     Balance::ByCount,
                 ),
                 part_index: 0,
-            },
-            &ObstaclePlanningOptions {
-                obstacles: vec![centered_obstacle(planner.field().unwrap().border(), 25.0)],
-                inflation_distance: 2.0,
             },
             RoutingOptions {
                 strategy: RoutingStrategy::GreedyNearest,
@@ -440,7 +341,7 @@ fn upstream_example_surface_remains_visually_sane() {
         .iter()
         .map(|machine| machine.ordered_swaths.len())
         .collect::<Vec<_>>();
-    assert_eq!(ordered_counts, vec![23, 23, 23, 22]);
+    assert_eq!(ordered_counts, vec![18, 18, 18, 17]);
     assert!(
         machine_plan
             .machines

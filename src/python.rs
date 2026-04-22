@@ -4,10 +4,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 
 use crate::{
-    Balance, ConnectorMode, DecompositionMode, DivisionPattern, DivisionPlan, Geo,
-    MachinePlanningOptions, MachineProfile, Maptrax, ObstaclePlanningOptions, OptimizeObjective,
-    Pose2D, RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel,
-    polygon_from_points,
+    Balance, ConnectorMode, DecompositionMode, DivisionPattern, DivisionPlan, Geo, HeadlandMode,
+    MachinePlanningOptions, MachineProfile, Maptrax, OptimizeObjective, Pose2D, RoutingOptions,
+    RoutingStrategy, TurnPlannerConfig, TurnPlannerModel, polygon_from_points,
 };
 
 fn py_err(err: crate::MaptraxError) -> PyErr {
@@ -104,12 +103,37 @@ fn build_machine_profiles(
 }
 
 fn parse_decomposition_mode(name: &str) -> PyResult<DecompositionMode> {
+    // Accept "auto_split:520" or "auto_split:520.0" to specify max_side.
+    if let Some(rest) = name.strip_prefix("auto_split:").or_else(|| name.strip_prefix("auto-split:")) {
+        let max_side: f64 = rest.parse().map_err(|_| {
+            PyValueError::new_err(format!(
+                "auto_split needs a numeric max_side, got: {rest}"
+            ))
+        })?;
+        return Ok(DecompositionMode::AutoSplit { max_side });
+    }
     match name {
         "none" => Ok(DecompositionMode::None),
         "simple_split" | "simple-split" => Ok(DecompositionMode::SimpleSplit),
         "concave_split" | "concave-split" => Ok(DecompositionMode::ConcaveSplit),
         other => Err(PyValueError::new_err(format!(
             "unknown decomposition mode: {other}"
+        ))),
+    }
+}
+
+fn parse_headland_mode(name: &str, dedicated_machine: usize) -> PyResult<HeadlandMode> {
+    match name {
+        "one_per_machine" | "one-per-machine" | "round_robin" | "rotate" => {
+            Ok(HeadlandMode::OnePerMachine)
+        }
+        "dedicated" => Ok(HeadlandMode::Dedicated {
+            machine: dedicated_machine,
+        }),
+        "split_by_zone" | "split-by-zone" | "split" => Ok(HeadlandMode::SplitByZone),
+        "none" | "skip" => Ok(HeadlandMode::None),
+        other => Err(PyValueError::new_err(format!(
+            "unknown headland mode: {other}"
         ))),
     }
 }
@@ -188,17 +212,12 @@ fn machine_part_to_dict<'py>(
     }
     dict.set_item("assigned_swaths", assigned)?;
 
-    let assigned_headlands = PyList::empty(py);
-    for ring in &machine_plan.assigned_headlands {
-        assigned_headlands.append(ring_to_dict(py, ring)?)?;
+    let assigned_headland_arcs = PyList::empty(py);
+    for arc in &machine_plan.assigned_headland_arcs {
+        let coords: Vec<(f64, f64)> = arc.iter().map(|p| (p.x(), p.y())).collect();
+        assigned_headland_arcs.append(coords)?;
     }
-    dict.set_item("assigned_headlands", assigned_headlands)?;
-
-    let avoided = PyList::empty(py);
-    for swath in &machine_plan.avoided_swaths {
-        avoided.append(swath_to_dict(py, swath)?)?;
-    }
-    dict.set_item("avoided_swaths", avoided)?;
+    dict.set_item("assigned_headland_arcs", assigned_headland_arcs)?;
 
     let ordered = PyList::empty(py);
     for swath in &machine_plan.ordered_swaths {
@@ -211,6 +230,15 @@ fn machine_part_to_dict<'py>(
         tour.append(swath_to_dict(py, swath)?)?;
     }
     dict.set_item("tour", tour)?;
+
+    // Flat list of (x, y) points forming the whole drive path — one
+    // continuous polyline you can send straight to a controller / plotter.
+    let polyline: Vec<(f64, f64)> = crate::tour_polyline(&machine_plan.tour)
+        .into_iter()
+        .map(|p| (p.x(), p.y()))
+        .collect();
+    dict.set_item("tour_polyline", polyline)?;
+
     Ok(dict)
 }
 
@@ -229,17 +257,31 @@ fn part_snapshot_to_dict<'py>(
     }
     dict.set_item("headlands", headlands)?;
 
-    let transit_rings = PyList::empty(py);
-    for ring in &part.transit_rings {
-        transit_rings.append(ring_to_dict(py, ring)?)?;
-    }
-    dict.set_item("transit_rings", transit_rings)?;
-
     let swaths = PyList::empty(py);
     for swath in &part.swaths {
         swaths.append(swath_to_dict(py, swath)?)?;
     }
     dict.set_item("swaths", swaths)?;
+
+    // Split-ownership metadata: for AutoSplit parts, lists the split lines
+    // along which this part is the NON-OWNER (its swaths extend to the
+    // split, and the neighbour provides the midline headland).
+    let non_owned = PyList::empty(py);
+    for boundary in &part.non_owned_splits {
+        let entry = PyDict::new(py);
+        match *boundary {
+            crate::SplitBoundary::Vertical { x } => {
+                entry.set_item("axis", "vertical")?;
+                entry.set_item("position", x)?;
+            }
+            crate::SplitBoundary::Horizontal { y } => {
+                entry.set_item("axis", "horizontal")?;
+                entry.set_item("position", y)?;
+            }
+        }
+        non_owned.append(entry)?;
+    }
+    dict.set_item("non_owned_splits", non_owned)?;
     Ok(dict)
 }
 
@@ -256,23 +298,11 @@ fn staged_part_to_dict<'py>(
     }
     dict.set_item("headlands", headlands)?;
 
-    let transit_rings = PyList::empty(py);
-    for ring in &planned.transit_rings {
-        transit_rings.append(ring_to_dict(py, ring)?)?;
-    }
-    dict.set_item("transit_rings", transit_rings)?;
-
     let generated = PyList::empty(py);
     for swath in &planned.generated_swaths {
         generated.append(swath_to_dict(py, swath)?)?;
     }
     dict.set_item("generated_swaths", generated)?;
-
-    let avoided = PyList::empty(py);
-    for swath in &planned.avoided_swaths {
-        avoided.append(swath_to_dict(py, swath)?)?;
-    }
-    dict.set_item("avoided_swaths", avoided)?;
 
     let ordered = PyList::empty(py);
     for swath in &planned.ordered_swaths {
@@ -285,6 +315,31 @@ fn staged_part_to_dict<'py>(
         tour.append(swath_to_dict(py, swath)?)?;
     }
     dict.set_item("tour", tour)?;
+    Ok(dict)
+}
+
+fn machine_plan_to_dict<'py>(
+    py: Python<'py>,
+    planned: &crate::PlannedMachines,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("part_index", planned.part_index)?;
+    dict.set_item(
+        "estimated_work_time",
+        planned.division.estimated_work_time.clone(),
+    )?;
+    dict.set_item(
+        "estimated_transit",
+        planned.division.estimated_transit.clone(),
+    )?;
+    if let Some(pattern) = planned.division.pattern_used {
+        dict.set_item("pattern_used", format!("{:?}", pattern))?;
+    }
+    let machine_list = PyList::empty(py);
+    for machine in &planned.machines {
+        machine_list.append(machine_part_to_dict(py, machine)?)?;
+    }
+    dict.set_item("machines", machine_list)?;
     Ok(dict)
 }
 
@@ -387,6 +442,30 @@ impl PyMaptrax {
             .map_err(py_err)
     }
 
+    /// Combined decompose + generate step. Use `decomposition="auto_split:520"`
+    /// (for example) to auto-split a large field into sub-fields before
+    /// generating headlands + swaths per part. Returns the number of parts.
+    #[pyo3(signature = (swath_width, angle_degrees=0.0, headland_count=0, decomposition="none"))]
+    fn plan_field(
+        &mut self,
+        swath_width: f64,
+        angle_degrees: f64,
+        headland_count: usize,
+        decomposition: &str,
+    ) -> PyResult<usize> {
+        let mode = parse_decomposition_mode(decomposition)?;
+        self.inner
+            .decompose_field(mode)
+            .map_err(py_err)?;
+        self.inner
+            .generate_field(swath_width, angle_degrees, headland_count)
+            .map_err(py_err)?;
+        self.inner
+            .field()
+            .map(|field| field.parts().len())
+            .map_err(py_err)
+    }
+
     #[pyo3(signature = (
         part_index=0,
         routing_strategy="greedy_nearest",
@@ -421,7 +500,6 @@ impl PyMaptrax {
                     strategy: parse_routing_strategy(routing_strategy)?,
                     local_improvement_passes,
                 },
-                &crate::ObstaclePlanningOptions::default(),
                 &TurnPlannerConfig {
                     model: parse_turn_model(turn_model)?,
                     connector_mode: parse_connector_mode(connector_mode)?,
@@ -439,36 +517,6 @@ impl PyMaptrax {
 
     #[pyo3(signature = (
         part_index=0,
-        obstacle_polygons=Vec::<Vec<(f64, f64)>>::new(),
-        inflation_distance=0.0
-    ))]
-    fn avoid_obstacles<'py>(
-        &self,
-        py: Python<'py>,
-        part_index: usize,
-        obstacle_polygons: Vec<Vec<(f64, f64)>>,
-        inflation_distance: f64,
-    ) -> PyResult<Bound<'py, PyList>> {
-        let obstacles = obstacle_polygons
-            .into_iter()
-            .map(polygon_from_xy)
-            .collect::<crate::Result<Vec<_>>>()
-            .map_err(py_err)?;
-        let swaths = self
-            .inner
-            .avoid_obstacles_for_part(obstacles, inflation_distance, part_index)
-            .map_err(py_err)?;
-        let list = PyList::empty(py);
-        for swath in &swaths {
-            list.append(swath_to_dict(py, swath)?)?;
-        }
-        Ok(list)
-    }
-
-    #[pyo3(signature = (
-        part_index=0,
-        obstacle_polygons=Vec::<Vec<(f64, f64)>>::new(),
-        inflation_distance=0.0,
         routing_strategy="greedy_nearest",
         local_improvement_passes=0
     ))]
@@ -476,16 +524,9 @@ impl PyMaptrax {
         &self,
         py: Python<'py>,
         part_index: usize,
-        obstacle_polygons: Vec<Vec<(f64, f64)>>,
-        inflation_distance: f64,
         routing_strategy: &str,
         local_improvement_passes: usize,
     ) -> PyResult<Bound<'py, PyList>> {
-        let obstacles = obstacle_polygons
-            .into_iter()
-            .map(polygon_from_xy)
-            .collect::<crate::Result<Vec<_>>>()
-            .map_err(py_err)?;
         let ordered = self
             .inner
             .plan_ordered_swaths_for_part(
@@ -493,10 +534,6 @@ impl PyMaptrax {
                 RoutingOptions {
                     strategy: parse_routing_strategy(routing_strategy)?,
                     local_improvement_passes,
-                },
-                &ObstaclePlanningOptions {
-                    obstacles,
-                    inflation_distance,
                 },
             )
             .map_err(py_err)?;
@@ -509,8 +546,6 @@ impl PyMaptrax {
 
     #[pyo3(signature = (
         part_index=0,
-        obstacle_polygons=Vec::<Vec<(f64, f64)>>::new(),
-        inflation_distance=0.0,
         routing_strategy="greedy_nearest",
         local_improvement_passes=0,
         turn_model="reeds_shepp",
@@ -525,8 +560,6 @@ impl PyMaptrax {
         &self,
         py: Python<'py>,
         part_index: usize,
-        obstacle_polygons: Vec<Vec<(f64, f64)>>,
-        inflation_distance: f64,
         routing_strategy: &str,
         local_improvement_passes: usize,
         turn_model: &str,
@@ -537,11 +570,6 @@ impl PyMaptrax {
         machine_width: f64,
         swath_width: f64,
     ) -> PyResult<Bound<'py, PyDict>> {
-        let obstacles = obstacle_polygons
-            .into_iter()
-            .map(polygon_from_xy)
-            .collect::<crate::Result<Vec<_>>>()
-            .map_err(py_err)?;
         let staged = self
             .inner
             .plan_stages_for_part(
@@ -549,10 +577,6 @@ impl PyMaptrax {
                 RoutingOptions {
                     strategy: parse_routing_strategy(routing_strategy)?,
                     local_improvement_passes,
-                },
-                &ObstaclePlanningOptions {
-                    obstacles,
-                    inflation_distance,
                 },
                 &TurnPlannerConfig {
                     model: parse_turn_model(turn_model)?,
@@ -577,12 +601,12 @@ impl PyMaptrax {
         stride=1,
         bands=2,
         machine_profiles=None,
-        obstacle_polygons=Vec::<Vec<(f64, f64)>>::new(),
-        inflation_distance=0.0,
+        headland_mode="one_per_machine",
+        dedicated_machine=0,
         routing_strategy="greedy_nearest",
         local_improvement_passes=0,
         turn_model="reeds_shepp",
-        connector_mode="auto",
+        connector_mode="headland",
         min_turning_radius=2.0,
         step_size=0.2,
         machine_length=6.0,
@@ -599,8 +623,8 @@ impl PyMaptrax {
         stride: usize,
         bands: usize,
         machine_profiles: Option<Vec<(f64, f64)>>,
-        obstacle_polygons: Vec<Vec<(f64, f64)>>,
-        inflation_distance: f64,
+        headland_mode: &str,
+        dedicated_machine: usize,
         routing_strategy: &str,
         local_improvement_passes: usize,
         turn_model: &str,
@@ -611,24 +635,16 @@ impl PyMaptrax {
         machine_width: f64,
         swath_width: f64,
     ) -> PyResult<Bound<'py, PyDict>> {
-        let obstacles = obstacle_polygons
-            .into_iter()
-            .map(polygon_from_xy)
-            .collect::<crate::Result<Vec<_>>>()
-            .map_err(py_err)?;
         let plan = DivisionPlan {
             pattern: parse_pattern(pattern, stride, bands)?,
             balance: parse_balance(balance)?,
             machines: build_machine_profiles(machines, machine_profiles)?,
+            headlands: parse_headland_mode(headland_mode, dedicated_machine)?,
         };
         let planned = self
             .inner
             .plan_machines_for_part(
                 &MachinePlanningOptions { plan, part_index },
-                &ObstaclePlanningOptions {
-                    obstacles,
-                    inflation_distance,
-                },
                 RoutingOptions {
                     strategy: parse_routing_strategy(routing_strategy)?,
                     local_improvement_passes,
@@ -646,22 +662,83 @@ impl PyMaptrax {
             )
             .map_err(py_err)?;
 
-        let dict = PyDict::new(py);
-        dict.set_item("part_index", planned.part_index)?;
-        dict.set_item(
-            "estimated_work_time",
-            planned.division.estimated_work_time.clone(),
-        )?;
-        dict.set_item(
-            "estimated_transit",
-            planned.division.estimated_transit.clone(),
-        )?;
-        let machine_list = PyList::empty(py);
-        for machine in &planned.machines {
-            machine_list.append(machine_part_to_dict(py, machine)?)?;
+        Ok(machine_plan_to_dict(py, &planned)?)
+    }
+
+    /// Plan machines for EVERY part in the field (auto-split sub-fields).
+    /// The same DivisionPlan runs on each part with the full fleet; each
+    /// physical machine does part 0 then part 1, etc.
+    /// Returns a list of per-part plan dicts (same shape as plan_machines).
+    #[pyo3(signature = (
+        machines=1,
+        pattern="block",
+        balance="count",
+        stride=1,
+        bands=2,
+        machine_profiles=None,
+        headland_mode="one_per_machine",
+        dedicated_machine=0,
+        routing_strategy="greedy_nearest",
+        local_improvement_passes=0,
+        turn_model="reeds_shepp",
+        connector_mode="headland",
+        min_turning_radius=2.0,
+        step_size=0.2,
+        machine_length=6.0,
+        machine_width=3.0,
+        swath_width=0.0
+    ))]
+    fn plan_machines_all_parts<'py>(
+        &self,
+        py: Python<'py>,
+        machines: usize,
+        pattern: &str,
+        balance: &str,
+        stride: usize,
+        bands: usize,
+        machine_profiles: Option<Vec<(f64, f64)>>,
+        headland_mode: &str,
+        dedicated_machine: usize,
+        routing_strategy: &str,
+        local_improvement_passes: usize,
+        turn_model: &str,
+        connector_mode: &str,
+        min_turning_radius: f64,
+        step_size: f64,
+        machine_length: f64,
+        machine_width: f64,
+        swath_width: f64,
+    ) -> PyResult<Bound<'py, PyList>> {
+        let plan = DivisionPlan {
+            pattern: parse_pattern(pattern, stride, bands)?,
+            balance: parse_balance(balance)?,
+            machines: build_machine_profiles(machines, machine_profiles)?,
+            headlands: parse_headland_mode(headland_mode, dedicated_machine)?,
+        };
+        let turn = TurnPlannerConfig {
+            model: parse_turn_model(turn_model)?,
+            connector_mode: parse_connector_mode(connector_mode)?,
+            min_turning_radius,
+            step_size,
+            machine_length,
+            machine_width,
+            swath_width,
+            ..TurnPlannerConfig::default()
+        };
+        let routing = RoutingOptions {
+            strategy: parse_routing_strategy(routing_strategy)?,
+            local_improvement_passes,
+        };
+        let all_plans = self
+            .inner
+            .plan_machines_for_all_parts(&plan, routing, &turn)
+            .map_err(py_err)?;
+
+        let out = PyList::empty(py);
+        for planned in &all_plans {
+            out.append(machine_plan_to_dict(py, planned)?)?;
         }
-        dict.set_item("machines", machine_list)?;
-        Ok(dict)
+        Ok(out)
     }
 
     #[pyo3(signature = (start, goal, min_turning_radius, step_size=0.2))]

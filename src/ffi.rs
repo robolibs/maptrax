@@ -142,7 +142,6 @@ pub struct MaptraxPlanResultHandle {
 pub struct MaptraxPartSnapshotHandle {
     boundary: FlatRingBuffer,
     headlands: FlatRingBuffer,
-    transit_rings: FlatRingBuffer,
     swaths: FlatSwathBuffer,
 }
 
@@ -169,9 +168,7 @@ struct FlatRingBuffer {
 
 pub struct MaptraxStagesResultHandle {
     headlands: FlatRingBuffer,
-    transit_rings: FlatRingBuffer,
     generated: FlatSwathBuffer,
-    avoided: FlatSwathBuffer,
     ordered: FlatSwathBuffer,
     tour: FlatSwathBuffer,
 }
@@ -499,7 +496,6 @@ pub extern "C" fn maptrax_planner_part_snapshot(
         Ok::<_, crate::MaptraxError>(MaptraxPartSnapshotHandle {
             boundary: flatten_rings(std::slice::from_ref(&part.boundary)),
             headlands: flatten_rings(&part.headlands),
-            transit_rings: flatten_rings(&part.transit_rings),
             swaths: flatten_swaths(&part.swaths),
         })
     })();
@@ -528,7 +524,6 @@ pub extern "C" fn maptrax_planner_plan_part(
         let planned = planner.planner.plan_tour_for_part(
             part_index,
             routing_options_from_ffi(routing),
-            &crate::ObstaclePlanningOptions::default(),
             &turn_options_from_ffi(turn),
         )?;
         Ok::<_, crate::MaptraxError>(MaptraxPlanResultHandle {
@@ -561,14 +556,11 @@ pub extern "C" fn maptrax_planner_plan_stages_part(
         let staged = planner.planner.plan_stages_for_part(
             part_index,
             routing_options_from_ffi(routing),
-            &crate::ObstaclePlanningOptions::default(),
             &turn_options_from_ffi(turn),
         )?;
         Ok::<_, crate::MaptraxError>(MaptraxStagesResultHandle {
             headlands: flatten_rings(&staged.headlands),
-            transit_rings: flatten_rings(&staged.transit_rings),
             generated: flatten_swaths(&staged.generated_swaths),
-            avoided: flatten_swaths(&staged.avoided_swaths),
             ordered: flatten_swaths(&staged.ordered_swaths),
             tour: flatten_swaths(&staged.tour),
         })
@@ -651,21 +643,6 @@ pub extern "C" fn maptrax_stages_result_headlands_view(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn maptrax_stages_result_transit_rings_view(
-    result: *const MaptraxStagesResultHandle,
-) -> MaptraxRingBufferView {
-    if result.is_null() {
-        return MaptraxRingBufferView {
-            rings: ptr::null(),
-            rings_len: 0,
-            points: ptr::null(),
-            points_len: 0,
-        };
-    }
-    ring_buffer_view(unsafe { &(*result).transit_rings })
-}
-
-#[unsafe(no_mangle)]
 pub extern "C" fn maptrax_part_snapshot_boundary_view(
     snapshot: *const MaptraxPartSnapshotHandle,
 ) -> MaptraxRingBufferView {
@@ -696,21 +673,6 @@ pub extern "C" fn maptrax_part_snapshot_headlands_view(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn maptrax_part_snapshot_transit_rings_view(
-    snapshot: *const MaptraxPartSnapshotHandle,
-) -> MaptraxRingBufferView {
-    if snapshot.is_null() {
-        return MaptraxRingBufferView {
-            rings: ptr::null(),
-            rings_len: 0,
-            points: ptr::null(),
-            points_len: 0,
-        };
-    }
-    ring_buffer_view(unsafe { &(*snapshot).transit_rings })
-}
-
-#[unsafe(no_mangle)]
 pub extern "C" fn maptrax_part_snapshot_swaths_view(
     snapshot: *const MaptraxPartSnapshotHandle,
 ) -> MaptraxSwathBufferView {
@@ -738,21 +700,6 @@ pub extern "C" fn maptrax_stages_result_generated_view(
         };
     }
     swath_buffer_view(unsafe { &(*result).generated })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn maptrax_stages_result_avoided_view(
-    result: *const MaptraxStagesResultHandle,
-) -> MaptraxSwathBufferView {
-    if result.is_null() {
-        return MaptraxSwathBufferView {
-            swaths: ptr::null(),
-            swaths_len: 0,
-            points: ptr::null(),
-            points_len: 0,
-        };
-    }
-    swath_buffer_view(unsafe { &(*result).avoided })
 }
 
 #[unsafe(no_mangle)]

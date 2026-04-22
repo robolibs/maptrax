@@ -13,8 +13,7 @@ mod rerun_viz;
 
 use maptrax::{
     Balance, DivisionPattern, DivisionPlan, Field, MachinePlanningOptions, Maptrax,
-    ObstaclePlanningOptions, RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel,
-    segment_length,
+    RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel, segment_length,
 };
 use rerun::Color;
 
@@ -22,7 +21,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rec = rerun_viz::connect("maptrax_block")?;
     let datum = example_scenes::upstream_datum();
     let border = example_scenes::upstream_field_polygon(datum);
-    let obstacle = example_scenes::centered_obstacle(&border, 25.0);
 
     let mut field = Field::new(border.clone(), datum)?;
     field.gen_field(4.0, 0.0, 3)?;
@@ -33,12 +31,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &border,
         Color::from_rgb(120, 70, 70),
     )?;
-    rerun_viz::log_polygon(
-        &rec,
-        "enu/field/obstacle",
-        &obstacle,
-        Color::from_rgb(220, 40, 40),
-    )?;
 
     let mut planner = Maptrax::new();
     planner.set_field_object(field.clone());
@@ -46,10 +38,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &MachinePlanningOptions {
             plan: DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByLength),
             part_index: 0,
-        },
-        &ObstaclePlanningOptions {
-            obstacles: vec![obstacle.clone()],
-            inflation_distance: 2.0,
         },
         RoutingOptions {
             strategy: RoutingStrategy::GreedyNearest,
@@ -78,8 +66,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let color = rerun_viz::machine_color(machine.machine_index);
         rerun_viz::log_swaths_tinted(
             &rec,
-            &format!("enu/assigned/machine_{}", machine.machine_index),
+            &format!("enu/swaths/machine_{}", machine.machine_index),
             &machine.assigned_swaths,
+            color,
+        )?;
+        rerun_viz::log_polylines(
+            &rec,
+            &format!("enu/headlands/machine_{}", machine.machine_index),
+            &machine.assigned_headland_arcs,
             color,
         )?;
         rerun_viz::log_swaths_tinted(

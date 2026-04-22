@@ -42,6 +42,30 @@ pub fn log_swaths_tinted(
     log_swaths_with_palette(rec, path, swaths, Some(base_color))
 }
 
+/// Log a list of open polylines (e.g. headland arcs) under one path with a
+/// single colour.
+pub fn log_polylines(
+    rec: &RecordingStream,
+    path: &str,
+    polylines: &[Vec<Point<f64>>],
+    color: (u8, u8, u8),
+) -> Result<(), Box<dyn Error>> {
+    let strips: Vec<Vec<[f32; 2]>> = polylines
+        .iter()
+        .filter(|arc| arc.len() >= 2)
+        .map(|arc| arc.iter().copied().map(point2).collect())
+        .collect();
+    if strips.is_empty() {
+        return Ok(());
+    }
+    let colors: Vec<Color> = strips
+        .iter()
+        .map(|_| Color::from_rgb(color.0, color.1, color.2))
+        .collect();
+    rec.log(path, &LineStrips2D::new(strips).with_colors(colors))?;
+    Ok(())
+}
+
 fn log_swaths_with_palette(
     rec: &RecordingStream,
     path: &str,

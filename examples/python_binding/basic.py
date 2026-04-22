@@ -27,7 +27,7 @@ stages = planner.plan_stages(
     machine_width=3.0,
     swath_width=10.0,
 )
-print("staged_avoided_swaths:", len(stages["avoided_swaths"]))
+print("staged_generated_swaths:", len(stages["generated_swaths"]))
 print("staged_tour_segments:", len(stages["tour"]))
 
 plan = planner.plan_part(

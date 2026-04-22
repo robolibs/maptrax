@@ -227,6 +227,88 @@ fn normalize_2d(x: &mut f64, y: &mut f64) {
     }
 }
 
+/// Intersection of two polygons assuming the `clipper` is convex
+/// (Sutherland-Hodgman). Returns `None` if the intersection is empty or
+/// degenerate. Both polygons should be CCW-wound.
+pub fn polygon_intersection(
+    subject: &Polygon<f64>,
+    clipper: &Polygon<f64>,
+) -> Option<Polygon<f64>> {
+    let subject_verts = polygon_open_vertices(subject);
+    let clipper_verts = polygon_open_vertices(clipper);
+    if subject_verts.len() < 3 || clipper_verts.len() < 3 {
+        return None;
+    }
+
+    let mut output: Vec<Point<f64>> = subject_verts;
+    let clipper_ccw = polygon_ensure_ccw(clipper);
+    let clipper_verts = polygon_open_vertices(&clipper_ccw);
+
+    for i in 0..clipper_verts.len() {
+        if output.is_empty() {
+            break;
+        }
+        let edge_a = clipper_verts[i];
+        let edge_b = clipper_verts[(i + 1) % clipper_verts.len()];
+        let input = std::mem::take(&mut output);
+        let mut prev = *input.last().unwrap();
+        let mut prev_inside = point_is_inside_edge(prev, edge_a, edge_b);
+        for curr in input {
+            let curr_inside = point_is_inside_edge(curr, edge_a, edge_b);
+            if curr_inside {
+                if !prev_inside {
+                    if let Some(cross) = line_line_intersection(prev, curr, edge_a, edge_b) {
+                        output.push(cross);
+                    }
+                }
+                output.push(curr);
+            } else if prev_inside {
+                if let Some(cross) = line_line_intersection(prev, curr, edge_a, edge_b) {
+                    output.push(cross);
+                }
+            }
+            prev = curr;
+            prev_inside = curr_inside;
+        }
+    }
+
+    if output.len() < 3 {
+        return None;
+    }
+    let polygon = polygon_from_points(output);
+    if polygon_area(&polygon).abs() < 1e-9 {
+        return None;
+    }
+    Some(polygon)
+}
+
+fn point_is_inside_edge(point: Point<f64>, edge_a: Point<f64>, edge_b: Point<f64>) -> bool {
+    // CCW polygon: a point is inside (to the left of) edge (a -> b) when the
+    // cross product is non-negative.
+    let cross = (edge_b.x() - edge_a.x()) * (point.y() - edge_a.y())
+        - (edge_b.y() - edge_a.y()) * (point.x() - edge_a.x());
+    cross >= -1e-9
+}
+
+fn line_line_intersection(
+    p1: Point<f64>,
+    p2: Point<f64>,
+    p3: Point<f64>,
+    p4: Point<f64>,
+) -> Option<Point<f64>> {
+    let denom =
+        (p1.x() - p2.x()) * (p3.y() - p4.y()) - (p1.y() - p2.y()) * (p3.x() - p4.x());
+    if denom.abs() < 1e-12 {
+        return None;
+    }
+    let t = ((p1.x() - p3.x()) * (p3.y() - p4.y()) - (p1.y() - p3.y()) * (p3.x() - p4.x()))
+        / denom;
+    Some(Point::new(
+        p1.x() + t * (p2.x() - p1.x()),
+        p1.y() + t * (p2.y() - p1.y()),
+    ))
+}
+
 pub fn polygon_unique_sorted_intersections_with_line(
     polygon: &Polygon<f64>,
     normal: (f64, f64),

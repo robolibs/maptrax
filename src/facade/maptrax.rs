@@ -1,12 +1,11 @@
 use concord::Geo;
 use geo::Polygon;
 
-use crate::avoid::ObstacleAvoider;
 use crate::core::{MaptraxError, Result};
 use crate::division::{DivisionPlan, Divy};
 use crate::field::{
-    DecompositionMode, Field, Part, Ring, Swath, SwathAngleSearchOptions, SwathAngleSearchResult,
-    SwathObjective, create_ring,
+    DecompositionMode, Field, Part, Swath, SwathAngleSearchOptions, SwathAngleSearchResult,
+    SwathObjective,
 };
 use crate::net::{Nety, RoutingOptions};
 use crate::tour::{TourBuilder, TurnPlannerConfig};
@@ -48,26 +47,10 @@ impl Default for FieldGenerationOptions {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ObstaclePlanningOptions {
-    pub obstacles: Vec<Polygon>,
-    pub inflation_distance: f64,
-}
-
-impl Default for ObstaclePlanningOptions {
-    fn default() -> Self {
-        Self {
-            obstacles: Vec::new(),
-            inflation_distance: 0.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct PlannerOptions {
     pub field: FieldGenerationOptions,
     pub routing: RoutingOptions,
     pub turn: TurnPlannerConfig,
-    pub obstacles: ObstaclePlanningOptions,
     pub machines: MachinePlanningOptions,
 }
 
@@ -77,7 +60,6 @@ impl Default for PlannerOptions {
             field: FieldGenerationOptions::default(),
             routing: RoutingOptions::default(),
             turn: TurnPlannerConfig::default(),
-            obstacles: ObstaclePlanningOptions::default(),
             machines: MachinePlanningOptions::default(),
         }
     }
@@ -100,9 +82,7 @@ pub struct PlannedField {
 pub struct PlannedPartStages {
     pub part_index: usize,
     pub headlands: Vec<crate::field::Ring>,
-    pub transit_rings: Vec<crate::field::Ring>,
     pub generated_swaths: Vec<Swath>,
-    pub avoided_swaths: Vec<Swath>,
     pub ordered_swaths: Vec<Swath>,
     pub tour: Vec<Swath>,
 }
@@ -136,8 +116,8 @@ impl Default for MachinePlanningOptions {
 pub struct MachinePlannedPart {
     pub machine_index: usize,
     pub assigned_swaths: Vec<Swath>,
-    pub assigned_headlands: Vec<Ring>,
-    pub avoided_swaths: Vec<Swath>,
+    /// Arcs of headland rings assigned to this machine (open polylines).
+    pub assigned_headland_arcs: Vec<crate::division::HeadlandArc>,
     pub ordered_swaths: Vec<Swath>,
     pub tour: Vec<Swath>,
 }
@@ -216,19 +196,6 @@ impl Maptrax {
         Ok(Nety::new(&part.swaths))
     }
 
-    pub fn avoid_obstacles_for_part(
-        &self,
-        obstacles: Vec<Polygon>,
-        inflation_distance: f64,
-        part_index: usize,
-    ) -> Result<Vec<Swath>> {
-        let field = self.field()?;
-        let part = field.part(part_index)?;
-        let mut avoider = ObstacleAvoider::new(obstacles, field.datum());
-        avoider.set_field_boundary(part.boundary.polygon.clone());
-        Ok(avoider.avoid(&part.swaths, inflation_distance))
-    }
-
     pub fn plan_dubins(
         &self,
         start: Pose2D,
@@ -299,20 +266,10 @@ impl Maptrax {
         &self,
         part_index: usize,
         routing: RoutingOptions,
-        obstacle_options: &ObstaclePlanningOptions,
     ) -> Result<Vec<Swath>> {
         let field = self.field()?;
         let part = field.part(part_index)?;
-        let (working_swaths, _) = obstacle_adjusted_swaths_and_rings(
-            part,
-            field.datum(),
-            obstacle_options,
-            obstacle_clearance_distance(
-                part.swaths.first().map(|swath| swath.width).unwrap_or(0.0),
-                obstacle_options.inflation_distance,
-            ),
-        )?;
-        let mut nety = Nety::new(&working_swaths);
+        let mut nety = Nety::new(&part.swaths);
         nety.field_traversal_with_options(None, routing);
         Ok(ordered_work_swaths(nety.get_swaths()))
     }
@@ -321,11 +278,9 @@ impl Maptrax {
         &self,
         part_index: usize,
         routing: RoutingOptions,
-        obstacle_options: &ObstaclePlanningOptions,
         turn: &TurnPlannerConfig,
     ) -> Result<PlannedPart> {
-        let ordered_swaths =
-            self.plan_ordered_swaths_for_part(part_index, routing, obstacle_options)?;
+        let ordered_swaths = self.plan_ordered_swaths_for_part(part_index, routing)?;
         let tour = self.build_tour(part_index, &ordered_swaths, turn)?;
         Ok(PlannedPart {
             part_index,
@@ -338,34 +293,19 @@ impl Maptrax {
         &self,
         part_index: usize,
         routing: RoutingOptions,
-        obstacle_options: &ObstaclePlanningOptions,
         turn: &TurnPlannerConfig,
     ) -> Result<PlannedPartStages> {
         let field = self.field()?;
         let part = field.part(part_index)?;
         let generated_swaths = part.swaths.clone();
-        let (avoided_swaths, transit_rings) =
-            obstacle_adjusted_swaths_and_rings(
-                part,
-                field.datum(),
-                obstacle_options,
-                obstacle_clearance_distance(
-                    part.swaths.first().map(|swath| swath.width).unwrap_or(0.0),
-                    obstacle_options.inflation_distance,
-                ),
-            )?;
-        let mut nety = Nety::new(&avoided_swaths);
+        let mut nety = Nety::new(&part.swaths);
         nety.field_traversal_with_options(None, routing);
         let ordered_swaths = ordered_work_swaths(nety.get_swaths());
-        let mut transit_part = part.clone();
-        transit_part.transit_rings = transit_rings.clone();
-        let tour = TourBuilder::build(&transit_part, &ordered_swaths, turn);
+        let tour = TourBuilder::build(part, &ordered_swaths, turn);
         Ok(PlannedPartStages {
             part_index,
             headlands: part.headlands.clone(),
-            transit_rings,
             generated_swaths,
-            avoided_swaths,
             ordered_swaths,
             tour,
         })
@@ -376,12 +316,7 @@ impl Maptrax {
         let part_count = self.field()?.get_parts().len();
         let mut parts = Vec::with_capacity(part_count);
         for part_index in 0..part_count {
-            parts.push(self.plan_stages_for_part(
-                part_index,
-                options.routing,
-                &options.obstacles,
-                &options.turn,
-            )?);
+            parts.push(self.plan_stages_for_part(part_index, options.routing, &options.turn)?);
         }
         Ok(PlannedFieldStages {
             objective_results,
@@ -406,10 +341,31 @@ impl Maptrax {
         })
     }
 
+    /// Plan machines for every Part in the current field, reusing the same
+    /// DivisionPlan for each. Useful after AutoSplit decomposition when the
+    /// field has been bisected into multiple sub-fields.
+    pub fn plan_machines_for_all_parts(
+        &self,
+        plan: &DivisionPlan,
+        routing: RoutingOptions,
+        turn: &TurnPlannerConfig,
+    ) -> Result<Vec<PlannedMachines>> {
+        let part_count = self.field()?.get_parts().len();
+        let mut out = Vec::with_capacity(part_count);
+        for part_index in 0..part_count {
+            let plan = plan.clone();
+            out.push(self.plan_machines_for_part(
+                &MachinePlanningOptions { plan, part_index },
+                routing,
+                turn,
+            )?);
+        }
+        Ok(out)
+    }
+
     pub fn plan_machines_for_part(
         &self,
         options: &MachinePlanningOptions,
-        obstacle_options: &ObstaclePlanningOptions,
         routing: RoutingOptions,
         turn: &TurnPlannerConfig,
     ) -> Result<PlannedMachines> {
@@ -419,55 +375,27 @@ impl Maptrax {
 
         let machine_count = options.plan.machine_count();
         let mut machines = Vec::with_capacity(machine_count);
-        let empty_headlands: Vec<Ring> = Vec::new();
         for machine_index in 0..machine_count {
             let assigned_swaths = division
                 .swaths_per_machine
                 .get(machine_index)
                 .cloned()
                 .unwrap_or_default();
-            let assigned_headlands = division
-                .headlands_per_machine
+            let assigned_headland_arcs = division
+                .headland_arcs_per_machine
                 .get(machine_index)
                 .cloned()
-                .unwrap_or_else(|| empty_headlands.clone());
+                .unwrap_or_default();
 
-            let avoided_swaths = if obstacle_options.obstacles.is_empty() {
-                assigned_swaths.clone()
-            } else {
-                let mut avoider =
-                    ObstacleAvoider::new(obstacle_options.obstacles.clone(), field.datum());
-                avoider.set_field_boundary(part.boundary.polygon.clone());
-                avoider.avoid(
-                    &assigned_swaths,
-                    obstacle_clearance_distance(
-                        part.swaths.first().map(|swath| swath.width).unwrap_or(turn.swath_width),
-                        obstacle_options.inflation_distance,
-                    ),
-                )
-            };
-            let transit_rings = obstacle_transit_rings(
-                &part,
-                field.datum(),
-                obstacle_options,
-                obstacle_clearance_distance(
-                    part.swaths.first().map(|swath| swath.width).unwrap_or(turn.swath_width),
-                    obstacle_options.inflation_distance,
-                ),
-            )?;
-
-            let mut nety = Nety::new(&avoided_swaths);
+            let mut nety = Nety::new(&assigned_swaths);
             nety.field_traversal_with_options(None, routing);
             let ordered_swaths = ordered_work_swaths(nety.get_swaths());
-            let mut transit_part = part.clone();
-            transit_part.transit_rings = transit_rings;
-            let tour = TourBuilder::build(&transit_part, &ordered_swaths, turn);
+            let tour = TourBuilder::build(&part, &ordered_swaths, turn);
 
             machines.push(MachinePlannedPart {
                 machine_index,
                 assigned_swaths,
-                assigned_headlands,
-                avoided_swaths,
+                assigned_headland_arcs,
                 ordered_swaths,
                 tour,
             });
@@ -481,46 +409,38 @@ impl Maptrax {
     }
 }
 
+/// Flatten a tour (list of swath/connector segments) into a single continuous
+/// polyline of (x, y) points. Adjacent segments meet at shared endpoints, so
+/// we skip duplicate points at the joins. The returned Vec<Point> is the
+/// full drive path you can feed to a controller, plot, or export.
+pub fn tour_polyline(tour: &[Swath]) -> Vec<geo::Point<f64>> {
+    let mut out: Vec<geo::Point<f64>> = Vec::new();
+    for swath in tour {
+        let segment_points: Vec<geo::Point<f64>> = if swath.points.len() >= 2 {
+            swath.points.clone()
+        } else {
+            vec![swath.head(), swath.tail()]
+        };
+        for point in segment_points {
+            match out.last() {
+                Some(last) => {
+                    let dx = point.x() - last.x();
+                    let dy = point.y() - last.y();
+                    if dx * dx + dy * dy > 1e-12 {
+                        out.push(point);
+                    }
+                }
+                None => out.push(point),
+            }
+        }
+    }
+    out
+}
+
 fn ordered_work_swaths(swaths: &[Swath]) -> Vec<Swath> {
     swaths
         .iter()
         .filter(|swath| swath.r#type != crate::field::SwathType::Connection)
         .cloned()
         .collect()
-}
-
-fn obstacle_adjusted_swaths_and_rings(
-    part: &Part,
-    datum: Geo,
-    obstacle_options: &ObstaclePlanningOptions,
-    clearance_distance: f64,
-) -> Result<(Vec<Swath>, Vec<Ring>)> {
-    if obstacle_options.obstacles.is_empty() {
-        return Ok((part.swaths.clone(), Vec::new()));
-    }
-
-    let mut avoider = ObstacleAvoider::new(obstacle_options.obstacles.clone(), datum);
-    avoider.set_field_boundary(part.boundary.polygon.clone());
-    let avoided = avoider.avoid(&part.swaths, clearance_distance);
-    let rings = avoider
-        .transit_obstacles()
-        .iter()
-        .enumerate()
-        .map(|(index, polygon)| create_ring(polygon.clone(), format!("obstacle_transit_{}", index)))
-        .collect::<Result<Vec<_>>>()?;
-    Ok((avoided, rings))
-}
-
-fn obstacle_transit_rings(
-    part: &Part,
-    datum: Geo,
-    obstacle_options: &ObstaclePlanningOptions,
-    clearance_distance: f64,
-) -> Result<Vec<Ring>> {
-    obstacle_adjusted_swaths_and_rings(part, datum, obstacle_options, clearance_distance)
-        .map(|(_, rings)| rings)
-}
-
-fn obstacle_clearance_distance(swath_width: f64, inflation_distance: f64) -> f64 {
-    swath_width.max(inflation_distance)
 }

@@ -1,8 +1,8 @@
 use concord::{Geo, Wgs, to_enu};
 use geo::Point;
 use maptrax::{
-    Balance, DivisionPattern, DivisionPlan, MachinePlanningOptions, Maptrax, ObstaclePlanningOptions,
-    RoutingOptions, RoutingStrategy, SwathType, TurnPlannerConfig, polygon_from_points,
+    Balance, DivisionPattern, DivisionPlan, MachinePlanningOptions, Maptrax, RoutingOptions,
+    RoutingStrategy, SwathType, TurnPlannerConfig, polygon_from_points,
 };
 
 fn stripe_1_by_count(machines: usize) -> DivisionPlan {
@@ -40,29 +40,6 @@ fn upstream_fixture_polygon() -> geo::Polygon<f64> {
     )
 }
 
-fn centered_obstacle(border: &geo::Polygon<f64>, half_size: f64) -> geo::Polygon<f64> {
-    let vertices = border.exterior().points().collect::<Vec<_>>();
-    let (min_x, max_x) = vertices
-        .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, p| {
-            (acc.0.min(p.x()), acc.1.max(p.x()))
-        });
-    let (min_y, max_y) = vertices
-        .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, p| {
-            (acc.0.min(p.y()), acc.1.max(p.y()))
-        });
-
-    let center_x = (min_x + max_x) * 0.5;
-    let center_y = (min_y + max_y) * 0.5;
-    polygon_from_points(vec![
-        Point::new(center_x - half_size, center_y - half_size),
-        Point::new(center_x + half_size, center_y - half_size),
-        Point::new(center_x + half_size, center_y + half_size),
-        Point::new(center_x - half_size, center_y + half_size),
-    ])
-}
-
 #[test]
 fn machine_planning_preserves_assigned_swath_totals() {
     let mut mt = Maptrax::new();
@@ -76,7 +53,6 @@ fn machine_planning_preserves_assigned_swath_totals() {
                 plan: stripe_1_by_count(3),
                 part_index: 0,
             },
-            &ObstaclePlanningOptions::default(),
             RoutingOptions::default(),
             &TurnPlannerConfig {
                 swath_width: 10.0,
@@ -98,28 +74,17 @@ fn machine_planning_preserves_assigned_swath_totals() {
 }
 
 #[test]
-fn machine_planning_tracks_assigned_avoided_routed_flow() {
+fn machine_planning_tracks_assigned_routed_flow() {
     let mut mt = Maptrax::new();
     mt.set_field(rectangular_polygon(), Geo::new(51.0, 5.0, 0.0))
         .expect("set field");
     mt.generate_field(10.0, 90.0, 1).expect("generate");
-
-    let obstacle = polygon_from_points(vec![
-        Point::new(45.0, 15.0),
-        Point::new(55.0, 15.0),
-        Point::new(55.0, 35.0),
-        Point::new(45.0, 35.0),
-    ]);
 
     let planned = mt
         .plan_machines_for_part(
             &MachinePlanningOptions {
                 plan: stripe_1_by_count(2),
                 part_index: 0,
-            },
-            &ObstaclePlanningOptions {
-                obstacles: vec![obstacle],
-                inflation_distance: 2.0,
             },
             RoutingOptions {
                 strategy: RoutingStrategy::Snake,
@@ -134,7 +99,6 @@ fn machine_planning_tracks_assigned_avoided_routed_flow() {
 
     for machine in &planned.machines {
         assert!(!machine.assigned_swaths.is_empty());
-        assert!(!machine.avoided_swaths.is_empty());
         assert!(!machine.ordered_swaths.is_empty());
         assert!(!machine.tour.is_empty());
         assert!(
@@ -155,19 +119,12 @@ fn upstream_machine_fixture_counts_remain_stable() {
     )
     .expect("set field");
     mt.generate_field(4.0, 0.0, 3).expect("generate");
-    let border = mt.field().unwrap().border().clone();
-
-    let obstacle = centered_obstacle(&border, 25.0);
 
     let planned = mt
         .plan_machines_for_part(
             &MachinePlanningOptions {
                 plan: stripe_1_by_count(4),
                 part_index: 0,
-            },
-            &ObstaclePlanningOptions {
-                obstacles: vec![obstacle],
-                inflation_distance: 2.0,
             },
             RoutingOptions {
                 strategy: RoutingStrategy::GreedyNearest,
@@ -186,11 +143,6 @@ fn upstream_machine_fixture_counts_remain_stable() {
         .iter()
         .map(|machine| machine.assigned_swaths.len())
         .collect::<Vec<_>>();
-    let avoided_counts = planned
-        .machines
-        .iter()
-        .map(|machine| machine.avoided_swaths.len())
-        .collect::<Vec<_>>();
     let ordered_counts = planned
         .machines
         .iter()
@@ -198,8 +150,7 @@ fn upstream_machine_fixture_counts_remain_stable() {
         .collect::<Vec<_>>();
 
     assert_eq!(assigned_counts, vec![18, 18, 18, 17]);
-    assert_eq!(avoided_counts, vec![23, 23, 23, 22]);
-    assert_eq!(ordered_counts, vec![23, 23, 23, 22]);
+    assert_eq!(ordered_counts, assigned_counts);
     for machine in &planned.machines {
         assert!(
             machine

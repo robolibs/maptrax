@@ -2,8 +2,10 @@ use std::collections::HashSet;
 
 use geo::Point;
 
-use crate::core::{MaptraxError, Result, point_distance, segment_length};
-use crate::field::{Part, Ring, Swath, SwathType, canonical_swath_order};
+use crate::core::{
+    MaptraxError, Result, point_distance, points_equal, polygon_open_vertices, segment_length,
+};
+use crate::field::{Part, Ring, Swath, SwathType, canonical_swath_order, dominant_swath_tangent};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DivisionPattern {
@@ -31,6 +33,34 @@ pub enum Balance {
     /// Weighted-equal total segment length (better when rows have varying
     /// lengths on irregular fields).
     ByLength,
+}
+
+/// How headland rings are distributed across machines.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HeadlandMode {
+    /// One ring per machine, round-robin. Machine i owns ring (i mod
+    /// num_rings), so with 3 machines and 3 rings each machine gets one
+    /// complete headland ring. If there are more machines than rings, extra
+    /// machines get no headland work; if there are more rings than machines,
+    /// rings wrap and a machine may own two.
+    OnePerMachine,
+
+    /// All headland rings go to one machine (the chosen one still receives
+    /// its normal swath share on top of headland work).
+    Dedicated { machine: usize },
+
+    /// Split each ring into arcs by lateral zone along the swath normal.
+    /// Each machine gets the portion of each ring near its own swath band.
+    SplitByZone,
+
+    /// No headland work assigned (assume it's handled elsewhere).
+    None,
+}
+
+impl Default for HeadlandMode {
+    fn default() -> Self {
+        HeadlandMode::OnePerMachine
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,22 +101,38 @@ pub struct DivisionPlan {
     pub pattern: DivisionPattern,
     pub balance: Balance,
     pub machines: Vec<MachineProfile>,
+    /// Defaults to `HeadlandMode::Dedicated { machine: 0 }` — the typical
+    /// farm setup where one machine runs the entire perimeter.
+    pub headlands: HeadlandMode,
 }
 
 impl DivisionPlan {
-    /// Convenience: N machines with uniform profiles, default balance/pattern.
+    /// Convenience: N machines with uniform profiles, default balance/pattern,
+    /// and the default `Dedicated { machine: 0 }` headland mode.
     pub fn uniform(machines: usize, pattern: DivisionPattern, balance: Balance) -> Self {
         Self {
             pattern,
             balance,
             machines: MachineProfile::uniform(machines),
+            headlands: HeadlandMode::default(),
         }
     }
 
     pub fn machine_count(&self) -> usize {
         self.machines.len()
     }
+
+    /// Override the headland strategy, returning `self` for chaining.
+    pub fn with_headlands(mut self, mode: HeadlandMode) -> Self {
+        self.headlands = mode;
+        self
+    }
 }
+
+/// Open polyline representing one contiguous arc of a headland ring assigned
+/// to a single machine. Arcs are NOT closed — they represent a portion of the
+/// ring's perimeter lying within that machine's lateral zone.
+pub type HeadlandArc = Vec<Point>;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DivisionResult {
@@ -94,7 +140,12 @@ pub struct DivisionResult {
     /// for `Optimized`, where this reports the winning concrete pattern.
     pub pattern_used: Option<DivisionPattern>,
     pub swaths_per_machine: Vec<Vec<Swath>>,
-    pub headlands_per_machine: Vec<Vec<Ring>>,
+    /// Per-machine list of headland arcs — portions of each headland ring
+    /// that fall within the machine's lateral zone along the swath normal.
+    /// A machine typically gets two arcs per ring (one on the top of the
+    /// field, one on the bottom) unless it owns the leftmost or rightmost
+    /// zone, in which case its arcs wrap around the end of the field.
+    pub headland_arcs_per_machine: Vec<Vec<HeadlandArc>>,
     /// Estimated pure work time per machine (seconds). Computed as
     /// total assigned swath length / machine speed.
     pub estimated_work_time: Vec<f64>,
@@ -142,12 +193,25 @@ impl Divy {
             pattern => (apply_pattern(&ordered, plan, pattern), pattern),
         };
 
-        let headlands_per_machine = split_headlands(&headlands, plan.machine_count());
+        let headland_arcs_per_machine = assign_headlands(
+            &headlands,
+            &swaths_per_machine,
+            &ordered,
+            plan.headlands,
+        );
 
-        let estimated_work_time = swaths_per_machine
+        let estimated_work_time: Vec<f64> = swaths_per_machine
             .iter()
             .zip(plan.machines.iter())
-            .map(|(swaths, profile)| total_length(swaths) / profile.speed)
+            .enumerate()
+            .map(|(index, (swaths, profile))| {
+                let swath_len = total_length(swaths);
+                let headland_len: f64 = headland_arcs_per_machine
+                    .get(index)
+                    .map(|arcs| arcs.iter().map(|arc| polyline_length(arc)).sum())
+                    .unwrap_or(0.0);
+                (swath_len + headland_len) / profile.speed
+            })
             .collect();
 
         let estimated_transit = swaths_per_machine
@@ -158,7 +222,7 @@ impl Divy {
         Ok(DivisionResult {
             pattern_used: Some(pattern_used),
             swaths_per_machine,
-            headlands_per_machine,
+            headland_arcs_per_machine,
             estimated_work_time,
             estimated_transit,
         })
@@ -412,12 +476,248 @@ fn by_count_quotas(total: usize, shares: &[f64]) -> Vec<usize> {
     quotas
 }
 
-fn split_headlands(headlands: &[Ring], machine_count: usize) -> Vec<Vec<Ring>> {
-    let mut buckets = vec![Vec::new(); machine_count];
-    for (index, ring) in headlands.iter().enumerate() {
-        buckets[index % machine_count].push(ring.clone());
+fn polyline_length(points: &[Point]) -> f64 {
+    points
+        .windows(2)
+        .map(|pair| point_distance(pair[0], pair[1]))
+        .sum()
+}
+
+fn assign_headlands(
+    headlands: &[Ring],
+    swaths_per_machine: &[Vec<Swath>],
+    all_work_swaths: &[Swath],
+    mode: HeadlandMode,
+) -> Vec<Vec<HeadlandArc>> {
+    let machine_count = swaths_per_machine.len();
+    let mut result: Vec<Vec<HeadlandArc>> = vec![Vec::new(); machine_count];
+
+    if machine_count == 0 || headlands.is_empty() {
+        return result;
     }
-    buckets
+
+    match mode {
+        HeadlandMode::None => result,
+        HeadlandMode::OnePerMachine => {
+            for (ring_idx, ring) in headlands.iter().enumerate() {
+                let pts = polygon_open_vertices(&ring.polygon);
+                if pts.len() < 2 {
+                    continue;
+                }
+                let target = ring_idx % machine_count;
+                let mut arc = pts.clone();
+                arc.push(pts[0]);
+                result[target].push(arc);
+            }
+            result
+        }
+        HeadlandMode::Dedicated { machine } => {
+            let target = machine.min(machine_count - 1);
+            for ring in headlands {
+                let pts = polygon_open_vertices(&ring.polygon);
+                if pts.len() < 2 {
+                    continue;
+                }
+                let mut arc = pts.clone();
+                arc.push(pts[0]);
+                result[target].push(arc);
+            }
+            result
+        }
+        HeadlandMode::SplitByZone => {
+            split_headlands_into_arcs(headlands, swaths_per_machine, all_work_swaths)
+        }
+    }
+}
+
+/// Split each headland ring into arcs belonging to each machine's lateral
+/// zone. The zone for machine i is defined by the midpoints between i's mean
+/// lateral position and its neighbours' lateral positions (along the swath
+/// normal). A machine with no assigned swaths contributes no zone.
+fn split_headlands_into_arcs(
+    headlands: &[Ring],
+    swaths_per_machine: &[Vec<Swath>],
+    all_work_swaths: &[Swath],
+) -> Vec<Vec<HeadlandArc>> {
+    let machine_count = swaths_per_machine.len();
+    let mut result: Vec<Vec<HeadlandArc>> = vec![Vec::new(); machine_count];
+
+    if machine_count == 0 || headlands.is_empty() || all_work_swaths.is_empty() {
+        return result;
+    }
+
+    let tangent = dominant_swath_tangent(all_work_swaths);
+    let normal = (-tangent.1, tangent.0);
+
+    // Mean lateral position per machine. None for empty machines.
+    let lats: Vec<Option<f64>> = swaths_per_machine
+        .iter()
+        .map(|swaths| {
+            if swaths.is_empty() {
+                None
+            } else {
+                let sum: f64 = swaths
+                    .iter()
+                    .map(|s| lateral_of(s.head(), s.tail(), normal))
+                    .sum();
+                Some(sum / swaths.len() as f64)
+            }
+        })
+        .collect();
+
+    // Order active machines by lateral position.
+    let mut ordered: Vec<(usize, f64)> = lats
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, lat)| lat.map(|l| (idx, l)))
+        .collect();
+    ordered.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    if ordered.is_empty() {
+        return result;
+    }
+
+    // Single active machine: give them every ring whole.
+    if ordered.len() == 1 {
+        let m = ordered[0].0;
+        for ring in headlands {
+            let points = polygon_open_vertices(&ring.polygon);
+            if !points.is_empty() {
+                let mut arc = points.clone();
+                arc.push(points[0]); // close for continuity
+                result[m].push(arc);
+            }
+        }
+        return result;
+    }
+
+    // Zone boundaries between consecutive machines (midpoints of lat).
+    let boundaries: Vec<f64> = ordered
+        .windows(2)
+        .map(|pair| (pair[0].1 + pair[1].1) * 0.5)
+        .collect();
+
+    for ring in headlands {
+        let zone_arcs = split_ring_into_zone_arcs(&ring.polygon, &boundaries, normal);
+        for (zone_idx, arcs) in zone_arcs.into_iter().enumerate() {
+            let machine_idx = ordered[zone_idx].0;
+            result[machine_idx].extend(arcs);
+        }
+    }
+
+    result
+}
+
+fn lateral_of(head: Point, tail: Point, normal: (f64, f64)) -> f64 {
+    let cx = (head.x() + tail.x()) * 0.5;
+    let cy = (head.y() + tail.y()) * 0.5;
+    cx * normal.0 + cy * normal.1
+}
+
+/// Split one ring polygon into arcs grouped by lateral zone.
+/// Zone index 0 corresponds to the lowest lateral range (left of the first
+/// boundary), zone `boundaries.len()` is the highest (right of the last).
+fn split_ring_into_zone_arcs(
+    polygon: &geo::Polygon,
+    boundaries: &[f64],
+    normal: (f64, f64),
+) -> Vec<Vec<HeadlandArc>> {
+    let num_zones = boundaries.len() + 1;
+    let mut zone_arcs: Vec<Vec<HeadlandArc>> = vec![Vec::new(); num_zones];
+
+    let points = polygon_open_vertices(polygon);
+    if points.len() < 2 {
+        return zone_arcs;
+    }
+
+    // Step 1: subdivide ring edges at boundary crossings so every edge lies
+    // entirely in one zone (by midpoint).
+    let mut subdivided: Vec<Point> = Vec::new();
+    let n = points.len();
+    for i in 0..n {
+        let a = points[i];
+        let b = points[(i + 1) % n];
+        let la = a.x() * normal.0 + a.y() * normal.1;
+        let lb = b.x() * normal.0 + b.y() * normal.1;
+        subdivided.push(a);
+
+        let denom = lb - la;
+        let mut crossings: Vec<(f64, Point)> = Vec::new();
+        if denom.abs() > 1e-12 {
+            for &boundary in boundaries {
+                if (la - boundary) * (lb - boundary) < 0.0 {
+                    let t = (boundary - la) / denom;
+                    if t > 1e-9 && t < 1.0 - 1e-9 {
+                        let cx = a.x() + t * (b.x() - a.x());
+                        let cy = a.y() + t * (b.y() - a.y());
+                        crossings.push((t, Point::new(cx, cy)));
+                    }
+                }
+            }
+        }
+        crossings.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+        for (_, p) in crossings {
+            subdivided.push(p);
+        }
+    }
+
+    // Step 2: walk subdivided edges; accumulate into arcs per zone.
+    let m = subdivided.len();
+    if m < 2 {
+        return zone_arcs;
+    }
+    let mut current_zone: Option<usize> = None;
+    let mut current_arc: HeadlandArc = Vec::new();
+
+    for i in 0..m {
+        let a = subdivided[i];
+        let b = subdivided[(i + 1) % m];
+        let mid_lat = ((a.x() + b.x()) * 0.5) * normal.0 + ((a.y() + b.y()) * 0.5) * normal.1;
+        let zone = boundaries.partition_point(|&bd| bd < mid_lat);
+
+        match current_zone {
+            Some(z) if z == zone => {
+                if current_arc.last().map_or(true, |p| !points_equal(*p, a, 1e-9)) {
+                    current_arc.push(a);
+                }
+                current_arc.push(b);
+            }
+            _ => {
+                if let Some(z) = current_zone.take() {
+                    if current_arc.len() >= 2 {
+                        zone_arcs[z].push(std::mem::take(&mut current_arc));
+                    } else {
+                        current_arc.clear();
+                    }
+                }
+                current_arc = vec![a, b];
+                current_zone = Some(zone);
+            }
+        }
+    }
+    if let Some(z) = current_zone {
+        if current_arc.len() >= 2 {
+            zone_arcs[z].push(current_arc);
+        }
+    }
+
+    // Merge wrap-around: if the first and last arcs of a zone meet at the
+    // same endpoint, stitch them into one polyline.
+    for arcs in zone_arcs.iter_mut() {
+        if arcs.len() >= 2 {
+            let first_start = arcs[0].first().copied();
+            let last_end = arcs.last().and_then(|arc| arc.last().copied());
+            if let (Some(start), Some(end)) = (first_start, last_end) {
+                if points_equal(start, end, 1e-6) {
+                    let first = arcs.remove(0);
+                    let last = arcs.last_mut().unwrap();
+                    last.extend(first.into_iter().skip(1));
+                }
+            }
+        }
+    }
+
+    zone_arcs
 }
 
 fn greedy_nearest_transit(swaths: &[Swath]) -> f64 {

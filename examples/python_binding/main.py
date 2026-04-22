@@ -15,19 +15,6 @@ FIELD = [
 ]
 
 
-def centered_obstacle(border, half_size):
-    xs = [point[0] for point in border]
-    ys = [point[1] for point in border]
-    center_x = (min(xs) + max(xs)) * 0.5
-    center_y = (min(ys) + max(ys)) * 0.5
-    return [
-        (center_x - half_size, center_y - half_size),
-        (center_x + half_size, center_y - half_size),
-        (center_x + half_size, center_y + half_size),
-        (center_x - half_size, center_y + half_size),
-    ]
-
-
 def swath_line(swath):
     return [[float(x), float(y)] for x, y in swath["points"]]
 
@@ -46,14 +33,11 @@ planner = maptrax.Maptrax()
 planner.set_field(FIELD, DATUM)
 planner.generate_field(4.0, 0.0, 3)
 
-obstacle = centered_obstacle(FIELD, 25.0)
-
 machine_plan = planner.plan_machines(
     part_index=0,
     machines=4,
-    division_type="alternate",
-    obstacle_polygons=[obstacle],
-    inflation_distance=2.0,
+    pattern="stripe",
+    balance="count",
     routing_strategy="greedy_nearest",
     turn_model="reeds_shepp",
     min_turning_radius=2.0,
@@ -63,13 +47,12 @@ machine_plan = planner.plan_machines(
 rr.init("maptrax_python_main", spawn=True)
 
 rr.log("field/border", rr.LineStrips2D([FIELD + [FIELD[0]]]))
-rr.log("field/obstacle", rr.LineStrips2D([obstacle + [obstacle[0]]]))
 
 for machine in machine_plan["machines"]:
     color = rgb(machine["machine_index"])
     rr.log(
-        f"machines/{machine['machine_index']}/avoided",
-        rr.LineStrips2D([swath_line(swath) for swath in machine["avoided_swaths"]], colors=[color]),
+        f"machines/{machine['machine_index']}/assigned",
+        rr.LineStrips2D([swath_line(swath) for swath in machine["assigned_swaths"]], colors=[color]),
     )
     rr.log(
         f"machines/{machine['machine_index']}/ordered",
@@ -79,12 +62,18 @@ for machine in machine_plan["machines"]:
         f"machines/{machine['machine_index']}/tour",
         rr.LineStrips2D([swath_line(swath) for swath in machine["tour"]], colors=[color]),
     )
+    rr.log(
+        f"machines/{machine['machine_index']}/headlands",
+        rr.LineStrips2D(
+            [[[float(x), float(y)] for x, y in arc] for arc in machine["assigned_headland_arcs"]],
+            colors=[color],
+        ),
+    )
 
 print(f"Field area: {planner.total_area():.1f} m^2")
 for machine in machine_plan["machines"]:
     print(
         f"Machine {machine['machine_index']}: "
         f"assigned={len(machine['assigned_swaths'])}, "
-        f"assigned_avoided={len(machine['avoided_swaths'])}, "
-        f"nety={len(machine['ordered_swaths'])}"
+        f"ordered={len(machine['ordered_swaths'])}"
     )

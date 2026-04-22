@@ -1,10 +1,8 @@
 use concord::Geo;
 use geo::Point;
 use maptrax::{
-    DecompositionMode, FieldGenerationMode, FieldGenerationOptions, Maptrax,
-    ObstaclePlanningOptions, PlannerOptions, RoutingOptions, RoutingStrategy, TurnPlannerConfig,
-    TurnPlannerModel,
-    polygon_from_points,
+    DecompositionMode, FieldGenerationMode, FieldGenerationOptions, Maptrax, PlannerOptions,
+    RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel, polygon_from_points,
 };
 
 fn main() {
@@ -15,12 +13,6 @@ fn main() {
         Point::new(70.0, 30.0),
         Point::new(70.0, 90.0),
         Point::new(0.0, 90.0),
-    ]);
-    let obstacle = polygon_from_points(vec![
-        Point::new(42.0, 18.0),
-        Point::new(58.0, 18.0),
-        Point::new(58.0, 38.0),
-        Point::new(42.0, 38.0),
     ]);
 
     let mut planner = Maptrax::new();
@@ -40,10 +32,6 @@ fn main() {
                 strategy: RoutingStrategy::Snake,
                 local_improvement_passes: 1,
             },
-            obstacles: ObstaclePlanningOptions {
-                obstacles: vec![obstacle],
-                inflation_distance: 2.0,
-            },
             turn: TurnPlannerConfig {
                 model: TurnPlannerModel::ReedsShepp,
                 ..TurnPlannerConfig::default()
@@ -56,11 +44,10 @@ fn main() {
     println!("parts: {}", planned.parts.len());
     for part in &planned.parts {
         println!(
-            "part {}: headlands={}, generated={}, avoided={}, ordered={}, tour={}",
+            "part {}: headlands={}, generated={}, ordered={}, tour={}",
             part.part_index,
             part.headlands.len(),
             part.generated_swaths.len(),
-            part.avoided_swaths.len(),
             part.ordered_swaths.len(),
             part.tour.len()
         );

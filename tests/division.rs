@@ -57,6 +57,7 @@ fn rejects_empty_machine_list() {
         pattern: DivisionPattern::Block,
         balance: Balance::ByCount,
         machines: Vec::new(),
+        headlands: maptrax::HeadlandMode::default(),
     };
     let err = Divy::plan(&field.get_parts()[0], &plan).unwrap_err();
     assert_eq!(err.to_string(), "machine count must be greater than zero");
@@ -190,6 +191,7 @@ fn weights_bias_assignment_proportionally() {
                 speed: 1.0,
             },
         ],
+        headlands: maptrax::HeadlandMode::default(),
     };
     let result = Divy::plan(&field.get_parts()[0], &plan).expect("plan");
     let (c0, c1) = (
@@ -228,13 +230,158 @@ fn optimized_makespan_picks_a_valid_candidate() {
 }
 
 #[test]
-fn headlands_are_distributed_across_machines() {
+fn default_headland_mode_one_per_machine() {
     let field = upstream_field(); // 3 headland rings
     let plan = DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByCount);
     let result = Divy::plan(&field.get_parts()[0], &plan).expect("plan");
 
-    let counts: Vec<usize> = result.headlands_per_machine.iter().map(Vec::len).collect();
-    assert_eq!(counts, vec![1, 1, 1]);
+    // Default is HeadlandMode::OnePerMachine — with 3 rings and 3 machines,
+    // each machine gets exactly one ring.
+    for (index, arcs) in result.headland_arcs_per_machine.iter().enumerate() {
+        assert_eq!(
+            arcs.len(),
+            1,
+            "machine {index} should own exactly 1 ring, got {}",
+            arcs.len()
+        );
+    }
+}
+
+#[test]
+fn one_per_machine_with_more_machines_than_rings() {
+    let field = upstream_field(); // 3 rings
+    let plan = DivisionPlan::uniform(5, DivisionPattern::Block, Balance::ByCount);
+    let result = Divy::plan(&field.get_parts()[0], &plan).expect("plan");
+
+    // Machines 0,1,2 get one ring each; machines 3,4 get none.
+    assert_eq!(result.headland_arcs_per_machine[0].len(), 1);
+    assert_eq!(result.headland_arcs_per_machine[1].len(), 1);
+    assert_eq!(result.headland_arcs_per_machine[2].len(), 1);
+    assert!(result.headland_arcs_per_machine[3].is_empty());
+    assert!(result.headland_arcs_per_machine[4].is_empty());
+}
+
+#[test]
+fn dedicated_headland_mode_respects_machine_index() {
+    let field = upstream_field();
+    let plan = DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByCount)
+        .with_headlands(maptrax::HeadlandMode::Dedicated { machine: 2 });
+    let result = Divy::plan(&field.get_parts()[0], &plan).expect("plan");
+
+    assert!(result.headland_arcs_per_machine[0].is_empty());
+    assert!(result.headland_arcs_per_machine[1].is_empty());
+    assert_eq!(result.headland_arcs_per_machine[2].len(), 3);
+}
+
+#[test]
+fn none_headland_mode_skips_headland_assignment() {
+    let field = upstream_field();
+    let plan = DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByCount)
+        .with_headlands(maptrax::HeadlandMode::None);
+    let result = Divy::plan(&field.get_parts()[0], &plan).expect("plan");
+
+    for arcs in &result.headland_arcs_per_machine {
+        assert!(arcs.is_empty());
+    }
+}
+
+#[test]
+fn split_by_zone_produces_arcs_for_every_machine() {
+    let field = upstream_field(); // 3 headland rings
+    let plan = DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByCount)
+        .with_headlands(maptrax::HeadlandMode::SplitByZone);
+    let result = Divy::plan(&field.get_parts()[0], &plan).expect("plan");
+
+    for (machine_idx, arcs) in result.headland_arcs_per_machine.iter().enumerate() {
+        assert!(
+            arcs.len() >= 3,
+            "machine {machine_idx} got only {} arcs under SplitByZone, expected ≥3",
+            arcs.len()
+        );
+        for arc in arcs {
+            assert!(arc.len() >= 2);
+        }
+    }
+}
+
+#[test]
+fn split_by_zone_covers_each_ring_without_double_counting() {
+    use maptrax::point_distance;
+    let field = upstream_field();
+    let plan = DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByCount)
+        .with_headlands(maptrax::HeadlandMode::SplitByZone);
+    let result = Divy::plan(&field.get_parts()[0], &plan).expect("plan");
+
+    let total_arc_length: f64 = result
+        .headland_arcs_per_machine
+        .iter()
+        .flatten()
+        .map(|arc| {
+            arc.windows(2)
+                .map(|pair| point_distance(pair[0], pair[1]))
+                .sum::<f64>()
+        })
+        .sum();
+
+    let total_ring_perimeter: f64 = field.get_parts()[0]
+        .headlands
+        .iter()
+        .map(|ring| {
+            let pts: Vec<_> = ring.polygon.exterior().points().collect();
+            pts.windows(2)
+                .map(|pair| point_distance(pair[0], pair[1]))
+                .sum::<f64>()
+        })
+        .sum();
+
+    let error = (total_arc_length - total_ring_perimeter).abs() / total_ring_perimeter;
+    assert!(
+        error < 0.01,
+        "arc total {total_arc_length:.1} vs ring perimeter {total_ring_perimeter:.1} ({:.2}% off)",
+        error * 100.0,
+    );
+}
+
+#[test]
+fn dedicated_headlands_inflate_only_the_owner_work_time() {
+    let field = upstream_field();
+    let plan_none = DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByCount)
+        .with_headlands(maptrax::HeadlandMode::None);
+    let plan_dedicated = DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByCount)
+        .with_headlands(maptrax::HeadlandMode::Dedicated { machine: 0 });
+
+    let none = Divy::plan(&field.get_parts()[0], &plan_none).expect("plan");
+    let dedicated = Divy::plan(&field.get_parts()[0], &plan_dedicated).expect("plan");
+
+    // Machine 0 carries all headland perimeter work in Dedicated mode.
+    assert!(
+        dedicated.estimated_work_time[0] > none.estimated_work_time[0] + 1.0,
+        "dedicated m0 {:.1}s should be >> none m0 {:.1}s",
+        dedicated.estimated_work_time[0],
+        none.estimated_work_time[0],
+    );
+    // Machines 1,2 do only interior swaths in both modes — times match.
+    assert!((dedicated.estimated_work_time[1] - none.estimated_work_time[1]).abs() < 1e-6);
+    assert!((dedicated.estimated_work_time[2] - none.estimated_work_time[2]).abs() < 1e-6);
+}
+
+#[test]
+fn one_per_machine_spreads_headland_cost() {
+    let field = upstream_field();
+    let plan_none = DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByCount)
+        .with_headlands(maptrax::HeadlandMode::None);
+    let plan_default = DivisionPlan::uniform(3, DivisionPattern::Block, Balance::ByCount);
+
+    let none = Divy::plan(&field.get_parts()[0], &plan_none).expect("plan");
+    let def = Divy::plan(&field.get_parts()[0], &plan_default).expect("plan");
+
+    // Each machine's work time grew a bit (each got one ring).
+    for index in 0..3 {
+        assert!(
+            def.estimated_work_time[index] > none.estimated_work_time[index] + 1.0,
+            "machine {index} should have extra headland time under default mode",
+        );
+    }
 }
 
 #[test]

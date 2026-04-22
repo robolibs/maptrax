@@ -140,8 +140,6 @@ MaptraxRingBufferView maptrax_part_snapshot_boundary_view(
     const MaptraxPartSnapshotHandle* snapshot);
 MaptraxRingBufferView maptrax_part_snapshot_headlands_view(
     const MaptraxPartSnapshotHandle* snapshot);
-MaptraxRingBufferView maptrax_part_snapshot_transit_rings_view(
-    const MaptraxPartSnapshotHandle* snapshot);
 MaptraxSwathBufferView maptrax_part_snapshot_swaths_view(
     const MaptraxPartSnapshotHandle* snapshot);
 
@@ -166,11 +164,7 @@ MaptraxSwathBufferView maptrax_plan_result_tour_view(
 void maptrax_stages_result_free(MaptraxStagesResultHandle* result);
 MaptraxRingBufferView maptrax_stages_result_headlands_view(
     const MaptraxStagesResultHandle* result);
-MaptraxRingBufferView maptrax_stages_result_transit_rings_view(
-    const MaptraxStagesResultHandle* result);
 MaptraxSwathBufferView maptrax_stages_result_generated_view(
-    const MaptraxStagesResultHandle* result);
-MaptraxSwathBufferView maptrax_stages_result_avoided_view(
     const MaptraxStagesResultHandle* result);
 MaptraxSwathBufferView maptrax_stages_result_ordered_view(
     const MaptraxStagesResultHandle* result);

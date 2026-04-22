@@ -5,8 +5,7 @@ mod rerun_viz;
 
 use maptrax::{
     Balance, ConnectorMode, DivisionPattern, DivisionPlan, Field, MachinePlanningOptions, Maptrax,
-    ObstaclePlanningOptions, OptimizeObjective, RoutingOptions, RoutingStrategy, TurnPlannerConfig,
-    TurnPlannerModel,
+    OptimizeObjective, RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel,
 };
 use rerun::Color;
 
@@ -14,7 +13,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rec = rerun_viz::connect("maptrax_machine_modes_scene")?;
     let datum = example_scenes::upstream_datum();
     let border = example_scenes::upstream_field_polygon(datum);
-    let obstacle = example_scenes::centered_obstacle(&border, 25.0);
 
     let mut field = Field::new(border.clone(), datum)?;
     field.gen_field(4.0, 0.0, 3)?;
@@ -31,19 +29,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &border,
         datum,
         Color::from_rgb(120, 70, 70),
-    )?;
-    rerun_viz::log_polygon(
-        &rec,
-        "enu/field/obstacle",
-        &obstacle,
-        Color::from_rgb(220, 40, 40),
-    )?;
-    rerun_viz::log_polygon_geo(
-        &rec,
-        "geo/field/obstacle",
-        &obstacle,
-        datum,
-        Color::from_rgb(220, 40, 40),
     )?;
 
     let scenarios: Vec<(&'static str, DivisionPlan)> = vec![
@@ -88,10 +73,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         planner.set_field_object(field.clone());
         let planned = planner.plan_machines_for_part(
             &MachinePlanningOptions { plan, part_index: 0 },
-            &ObstaclePlanningOptions {
-                obstacles: vec![obstacle.clone()],
-                inflation_distance: 2.0,
-            },
             RoutingOptions {
                 strategy: RoutingStrategy::GreedyNearest,
                 local_improvement_passes: 1,
@@ -198,10 +179,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 (120, 180, 220),
             )?;
             println!(
-                "  {mode_name} machine {}: assigned={}, avoided={}, ordered={}, tour={}, work_s={:.1}, transit_m={:.1}",
+                "  {mode_name} machine {}: assigned={}, ordered={}, tour={}, work_s={:.1}, transit_m={:.1}",
                 machine.machine_index,
                 machine.assigned_swaths.len(),
-                machine.avoided_swaths.len(),
                 machine.ordered_swaths.len(),
                 machine.tour.len(),
                 planned

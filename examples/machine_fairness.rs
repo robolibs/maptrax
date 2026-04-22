@@ -10,7 +10,7 @@ mod example_scenes;
 
 use maptrax::{
     Balance, DivisionPattern, DivisionPlan, Field, MachineProfile, Maptrax,
-    MachinePlanningOptions, ObstaclePlanningOptions, OptimizeObjective, RoutingOptions,
+    MachinePlanningOptions, OptimizeObjective, RoutingOptions,
     RoutingStrategy, TurnPlannerConfig, segment_length,
 };
 
@@ -63,6 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     MachineProfile { weight: 1.0, speed: 1.0 },
                     MachineProfile { weight: 1.0, speed: 1.0 },
                 ],
+                headlands: maptrax::HeadlandMode::default(),
             },
         ),
         (
@@ -82,7 +83,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         planner.set_field_object(field.clone());
         let planned = planner.plan_machines_for_part(
             &MachinePlanningOptions { plan, part_index: 0 },
-            &ObstaclePlanningOptions::default(),
             RoutingOptions {
                 strategy: RoutingStrategy::GreedyNearest,
                 local_improvement_passes: 1,

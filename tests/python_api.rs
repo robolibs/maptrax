@@ -80,11 +80,6 @@ fn python_module_exposes_maptrax_planning_surface() {
             .get_item("generated_swaths")
             .expect("generated")
             .expect("generated value");
-        let avoided = planner
-            .call_method0("avoid_obstacles")
-            .expect("avoid_obstacles")
-            .downcast_into::<pyo3::types::PyList>()
-            .expect("list");
         let routed = planner
             .call_method0("route_part")
             .expect("route_part")
@@ -92,7 +87,6 @@ fn python_module_exposes_maptrax_planning_surface() {
             .expect("list");
         assert!(headlands.len().expect("headlands len") > 0);
         assert!(generated.len().expect("generated len") > 0);
-        assert!(avoided.len() > 0);
         assert!(routed.len() > 0);
 
         let rs = planner

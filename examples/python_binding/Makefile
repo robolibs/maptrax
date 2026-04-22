@@ -16,7 +16,9 @@ endif
 VENV := .venv
 VENV_PYTHON := $(CURDIR)/$(VENV)/bin/python
 
-.PHONY: all develop basic turners rerun main main-no-obstacle main-extended clean
+.PHONY: all develop basic turners rerun main \
+        machine-stripe machine-block machine-optimized machine-fairness machine-split \
+        clean
 
 all: basic
 
@@ -40,13 +42,24 @@ main: develop
 	@$(VENV_PYTHON) -m pip install rerun-sdk
 	@$(VENV_PYTHON) main.py
 
-main-no-obstacle: develop
+machine-stripe: develop
 	@$(VENV_PYTHON) -m pip install rerun-sdk
-	@$(VENV_PYTHON) main_no_obstacle.py
+	@$(VENV_PYTHON) machine_stripe.py
 
-main-extended: develop
+machine-block: develop
 	@$(VENV_PYTHON) -m pip install rerun-sdk
-	@$(VENV_PYTHON) main_extended.py
+	@$(VENV_PYTHON) machine_block.py
+
+machine-optimized: develop
+	@$(VENV_PYTHON) -m pip install rerun-sdk
+	@$(VENV_PYTHON) machine_optimized.py
+
+machine-fairness: develop
+	@$(VENV_PYTHON) machine_fairness.py
+
+machine-split: develop
+	@$(VENV_PYTHON) -m pip install rerun-sdk
+	@$(VENV_PYTHON) machine_split_field.py
 
 clean:
 	@rm -rf $(VENV)

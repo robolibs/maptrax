@@ -15,8 +15,8 @@ mod rerun_viz;
 
 use maptrax::{
     Balance, DivisionPattern, DivisionPlan, Field, MachinePlanningOptions, Maptrax,
-    ObstaclePlanningOptions, OptimizeObjective, RoutingOptions, RoutingStrategy,
-    TurnPlannerConfig, TurnPlannerModel, segment_length,
+    OptimizeObjective, RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel,
+    segment_length,
 };
 use rerun::Color;
 
@@ -34,7 +34,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rec = rerun_viz::connect("maptrax_optimized")?;
     let datum = example_scenes::upstream_datum();
     let border = example_scenes::upstream_field_polygon(datum);
-    let obstacle = example_scenes::centered_obstacle(&border, 25.0);
 
     let mut field = Field::new(border.clone(), datum)?;
     field.gen_field(4.0, 0.0, 3)?;
@@ -44,12 +43,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "enu/field/border",
         &border,
         Color::from_rgb(120, 70, 70),
-    )?;
-    rerun_viz::log_polygon(
-        &rec,
-        "enu/field/obstacle",
-        &obstacle,
-        Color::from_rgb(220, 40, 40),
     )?;
 
     let candidates: Vec<(&'static str, DivisionPattern)> = vec![
@@ -67,10 +60,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         machine_width: 3.0,
         ..TurnPlannerConfig::default()
     };
-    let obstacles = ObstaclePlanningOptions {
-        obstacles: vec![obstacle.clone()],
-        inflation_distance: 2.0,
-    };
     let routing = RoutingOptions {
         strategy: RoutingStrategy::GreedyNearest,
         local_improvement_passes: 1,
@@ -87,7 +76,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 plan: DivisionPlan::uniform(3, *pattern, Balance::ByLength),
                 part_index: 0,
             },
-            &obstacles,
             routing,
             &turn,
         )?;
@@ -131,7 +119,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
             part_index: 0,
         },
-        &obstacles,
         routing,
         &turn,
     )?;
@@ -190,8 +177,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let color = rerun_viz::machine_color(machine.machine_index);
         rerun_viz::log_swaths_tinted(
             &rec,
-            &format!("enu/winner/assigned/machine_{}", machine.machine_index),
+            &format!("enu/winner/swaths/machine_{}", machine.machine_index),
             &machine.assigned_swaths,
+            color,
+        )?;
+        rerun_viz::log_polylines(
+            &rec,
+            &format!("enu/winner/headlands/machine_{}", machine.machine_index),
+            &machine.assigned_headland_arcs,
             color,
         )?;
         rerun_viz::log_swaths_tinted(
@@ -220,7 +213,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 plan: DivisionPlan::uniform(3, *pattern, Balance::ByLength),
                 part_index: 0,
             },
-            &obstacles,
             routing,
             &turn,
         )?;
@@ -232,8 +224,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let color = rerun_viz::machine_color(machine.machine_index);
             rerun_viz::log_swaths_tinted(
                 &rec,
-                &format!("enu/candidates/{slug}/machine_{}", machine.machine_index),
+                &format!("enu/candidates/{slug}/swaths/machine_{}", machine.machine_index),
                 &machine.assigned_swaths,
+                color,
+            )?;
+            rerun_viz::log_polylines(
+                &rec,
+                &format!(
+                    "enu/candidates/{slug}/headlands/machine_{}",
+                    machine.machine_index
+                ),
+                &machine.assigned_headland_arcs,
                 color,
             )?;
         }
