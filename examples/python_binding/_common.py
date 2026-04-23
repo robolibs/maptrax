@@ -27,6 +27,71 @@ def arc_polyline(arc):
     return [[float(x), float(y)] for x, y in arc]
 
 
+def swath_line_geo(planner, swath):
+    """Convert a swath's points from ENU to (lat, lon) tuples for
+    `rr.GeoLineStrings`."""
+    latlon = planner.enu_to_wgs_batch([(float(x), float(y)) for x, y in swath["points"]])
+    return [[lat, lon] for (lat, lon) in latlon]
+
+
+def arc_polyline_geo(planner, arc):
+    latlon = planner.enu_to_wgs_batch([(float(x), float(y)) for x, y in arc])
+    return [[lat, lon] for (lat, lon) in latlon]
+
+
+def polygon_geo(planner, xy_points):
+    """Convert a closed polygon (list of (x, y)) into a lat/lon ring
+    suitable for `rr.GeoLineStrings`."""
+    closed = list(xy_points) + [xy_points[0]] if xy_points and xy_points[0] != xy_points[-1] else list(xy_points)
+    latlon = planner.enu_to_wgs_batch([(float(x), float(y)) for x, y in closed])
+    return [[lat, lon] for (lat, lon) in latlon]
+
+
+def log_machine_views(rr, planner, prefix, machine, color):
+    """Log a single machine's swaths / tour / headlands in BOTH 2D (ENU)
+    and map (geo) views. `prefix` is a path prefix like "machines/m0"."""
+    swaths = machine["assigned_swaths"]
+    tour = machine["tour"]
+    arcs = machine["assigned_headland_arcs"]
+
+    if swaths:
+        rr.log(
+            f"enu/{prefix}/swaths",
+            rr.LineStrips2D([swath_line(s) for s in swaths], colors=[color]),
+        )
+        rr.log(
+            f"geo/{prefix}/swaths",
+            rr.GeoLineStrings(
+                lat_lon=[swath_line_geo(planner, s) for s in swaths],
+                colors=[color] * len(swaths),
+            ),
+        )
+    if tour:
+        rr.log(
+            f"enu/{prefix}/tour",
+            rr.LineStrips2D([swath_line(s) for s in tour], colors=[color]),
+        )
+        rr.log(
+            f"geo/{prefix}/tour",
+            rr.GeoLineStrings(
+                lat_lon=[swath_line_geo(planner, s) for s in tour],
+                colors=[color] * len(tour),
+            ),
+        )
+    if arcs:
+        rr.log(
+            f"enu/{prefix}/headlands",
+            rr.LineStrips2D([arc_polyline(a) for a in arcs], colors=[color]),
+        )
+        rr.log(
+            f"geo/{prefix}/headlands",
+            rr.GeoLineStrings(
+                lat_lon=[arc_polyline_geo(planner, a) for a in arcs],
+                colors=[color] * len(arcs),
+            ),
+        )
+
+
 MACHINE_PALETTE = [
     (230, 90, 90),
     (70, 180, 120),

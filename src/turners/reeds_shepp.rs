@@ -25,6 +25,10 @@ pub struct ReedsSheppSegment {
 pub struct ReedsSheppPath {
     pub segments: Vec<ReedsSheppSegment>,
     pub waypoints: Vec<Pose2D>,
+    /// Parallel to `waypoints`. `true` at index i means the machine is
+    /// moving IN REVERSE at that waypoint (velocity opposite to heading).
+    /// This is ground truth from the RS segment table, not inferred.
+    pub waypoint_reverse: Vec<bool>,
     pub total_length: f64,
     pub name: String,
 }
@@ -209,6 +213,7 @@ impl ReedsShepp {
             .unwrap_or_else(|| ReedsSheppPath {
                 segments: Vec::new(),
                 waypoints: vec![start, goal],
+                waypoint_reverse: vec![false, false],
                 total_length: 0.0,
                 name: String::new(),
             })
@@ -252,12 +257,39 @@ impl ReedsShepp {
                 });
             }
 
-            let total_length = rs_path.total_length * self.turning_radius.max(1e-9);
+            let radius = self.turning_radius.max(1e-9);
+            let total_length = rs_path.total_length * radius;
+
+            // Cumulative arc-length boundaries of each segment + its
+            // forward flag. Used to classify every sampled waypoint.
+            let mut segment_bounds: Vec<(f64, bool)> =
+                Vec::with_capacity(segments.len());
+            let mut cumulative = 0.0;
+            for segment in &segments {
+                cumulative += segment.length * radius;
+                segment_bounds.push((cumulative, segment.forward));
+            }
+
+            let find_forward = |seg_pos: f64| -> bool {
+                segment_bounds
+                    .iter()
+                    .find(|(boundary, _)| seg_pos <= *boundary + 1e-9)
+                    .map(|(_, forward)| *forward)
+                    .unwrap_or_else(|| {
+                        segment_bounds
+                            .last()
+                            .map(|(_, forward)| *forward)
+                            .unwrap_or(true)
+                    })
+            };
+
             let mut waypoints = Vec::new();
+            let mut waypoint_reverse = Vec::new();
             let mut seg = 0.0;
             while seg <= total_length {
-                let qnew = self.interpolate(q0, rs_path, seg / self.turning_radius.max(1e-9));
+                let qnew = self.interpolate(q0, rs_path, seg / radius);
                 waypoints.push(Pose2D::new(qnew[0], qnew[1], qnew[2]));
+                waypoint_reverse.push(!find_forward(seg));
                 seg += step_size;
             }
             if waypoints
@@ -269,11 +301,13 @@ impl ReedsShepp {
                 .unwrap_or(true)
             {
                 waypoints.push(goal);
+                waypoint_reverse.push(!find_forward(total_length));
             }
 
             paths.push(ReedsSheppPath {
                 segments,
                 waypoints,
+                waypoint_reverse,
                 total_length,
                 name: self.path_name(rs_path),
             });

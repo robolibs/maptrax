@@ -51,16 +51,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rec = rerun_viz::connect("maptrax_split_field")?;
     let border = big_irregular_field();
 
+    let datum = Geo::new(51.0, 5.0, 0.0);
+
     rerun_viz::log_polygon(
         &rec,
         "enu/field/border",
         &border,
         Color::from_rgb(160, 100, 100),
     )?;
+    rerun_viz::log_polygon_geo(
+        &rec,
+        "geo/field/border",
+        &border,
+        datum,
+        Color::from_rgb(160, 100, 100),
+    )?;
 
     let mut planner = Maptrax::new();
     planner
-        .set_field(border.clone(), Geo::new(51.0, 5.0, 0.0))
+        .set_field(border.clone(), datum)
         .expect("field");
 
     planner.plan_field(&FieldGenerationOptions {
@@ -91,6 +100,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &rec,
                 &format!("enu/parts/part_{part_index}/headland_{ring_index}"),
                 &ring.polygon,
+                Color::from_rgb(120, 120, 160),
+            )?;
+            rerun_viz::log_polygon_geo(
+                &rec,
+                &format!("geo/parts/part_{part_index}/headland_{ring_index}"),
+                &ring.polygon,
+                datum,
                 Color::from_rgb(120, 120, 160),
             )?;
         }
@@ -129,11 +145,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let color = machine_color(id);
             rerun_viz::log_swaths_tinted(
                 &rec,
-                &format!(
-                    "enu/parts/part_{part_index}/swaths/machine_{id}"
-                ),
+                &format!("enu/parts/part_{part_index}/swaths/machine_{id}"),
                 &machine.assigned_swaths,
                 color,
+            )?;
+            rerun_viz::log_swaths_geo_tinted(
+                &rec,
+                &format!("geo/parts/part_{part_index}/swaths/machine_{id}"),
+                &machine.assigned_swaths,
+                datum,
+                Some(color),
             )?;
         }
     }
@@ -163,6 +184,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &format!("enu/machines/m{machine_index}/tour"),
             &tour_per_machine[machine_index],
             color,
+        )?;
+        rerun_viz::log_swaths_geo_tinted(
+            &rec,
+            &format!("geo/machines/m{machine_index}/swaths"),
+            &assigned_per_machine[machine_index],
+            datum,
+            Some(color),
+        )?;
+        rerun_viz::log_polylines_geo(
+            &rec,
+            &format!("geo/machines/m{machine_index}/headlands"),
+            &arcs_per_machine[machine_index],
+            datum,
+            color,
+        )?;
+        rerun_viz::log_swaths_geo_tinted(
+            &rec,
+            &format!("geo/machines/m{machine_index}/tour"),
+            &tour_per_machine[machine_index],
+            datum,
+            Some(color),
         )?;
 
         let work_len: f64 = assigned_per_machine[machine_index]

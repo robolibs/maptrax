@@ -44,6 +44,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &border,
         Color::from_rgb(120, 70, 70),
     )?;
+    rerun_viz::log_polygon_geo(
+        &rec,
+        "geo/field/border",
+        &border,
+        datum,
+        Color::from_rgb(120, 70, 70),
+    )?;
 
     let candidates: Vec<(&'static str, DivisionPattern)> = vec![
         ("Block", DivisionPattern::Block),
@@ -175,23 +182,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     for (index, machine) in winner_plan.machines.iter().enumerate() {
         let color = rerun_viz::machine_color(machine.machine_index);
+        let idx = machine.machine_index;
         rerun_viz::log_swaths_tinted(
             &rec,
-            &format!("enu/winner/swaths/machine_{}", machine.machine_index),
+            &format!("enu/winner/swaths/machine_{idx}"),
             &machine.assigned_swaths,
             color,
         )?;
         rerun_viz::log_polylines(
             &rec,
-            &format!("enu/winner/headlands/machine_{}", machine.machine_index),
+            &format!("enu/winner/headlands/machine_{idx}"),
             &machine.assigned_headland_arcs,
             color,
         )?;
         rerun_viz::log_swaths_tinted(
             &rec,
-            &format!("enu/winner/tour/machine_{}", machine.machine_index),
+            &format!("enu/winner/tour/machine_{idx}"),
             &machine.tour,
             color,
+        )?;
+        rerun_viz::log_swaths_geo_tinted(
+            &rec,
+            &format!("geo/winner/swaths/machine_{idx}"),
+            &machine.assigned_swaths,
+            datum,
+            Some(color),
+        )?;
+        rerun_viz::log_polylines_geo(
+            &rec,
+            &format!("geo/winner/headlands/machine_{idx}"),
+            &machine.assigned_headland_arcs,
+            datum,
+            color,
+        )?;
+        rerun_viz::log_swaths_geo_tinted(
+            &rec,
+            &format!("geo/winner/tour/machine_{idx}"),
+            &machine.tour,
+            datum,
+            Some(color),
         )?;
         println!(
             "   {:<8} {:>8}  {:>10.1}  {:>10.1}  {:>10.1}",

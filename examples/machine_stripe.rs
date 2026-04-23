@@ -30,6 +30,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &border,
         Color::from_rgb(120, 70, 70),
     )?;
+    rerun_viz::log_polygon_geo(
+        &rec,
+        "geo/field/border",
+        &border,
+        datum,
+        Color::from_rgb(120, 70, 70),
+    )?;
 
     let mut planner = Maptrax::new();
     planner.set_field_object(field.clone());
@@ -66,23 +73,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_transit = 0.0;
     for machine in &planned.machines {
         let color = rerun_viz::machine_color(machine.machine_index);
+        let idx = machine.machine_index;
+
         rerun_viz::log_swaths_tinted(
             &rec,
-            &format!("enu/swaths/machine_{}", machine.machine_index),
+            &format!("enu/swaths/machine_{idx}"),
             &machine.assigned_swaths,
             color,
         )?;
         rerun_viz::log_polylines(
             &rec,
-            &format!("enu/headlands/machine_{}", machine.machine_index),
+            &format!("enu/headlands/machine_{idx}"),
             &machine.assigned_headland_arcs,
             color,
         )?;
         rerun_viz::log_swaths_tinted(
             &rec,
-            &format!("enu/tour/machine_{}", machine.machine_index),
+            &format!("enu/tour/machine_{idx}"),
             &machine.tour,
             color,
+        )?;
+
+        rerun_viz::log_swaths_geo_tinted(
+            &rec,
+            &format!("geo/swaths/machine_{idx}"),
+            &machine.assigned_swaths,
+            datum,
+            Some(color),
+        )?;
+        rerun_viz::log_polylines_geo(
+            &rec,
+            &format!("geo/headlands/machine_{idx}"),
+            &machine.assigned_headland_arcs,
+            datum,
+            color,
+        )?;
+        rerun_viz::log_swaths_geo_tinted(
+            &rec,
+            &format!("geo/tour/machine_{idx}"),
+            &machine.tour,
+            datum,
+            Some(color),
         )?;
 
         let work_len: f64 = machine

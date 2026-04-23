@@ -1,10 +1,8 @@
 """Optimized division demo — planner enumerates candidates, picks the best.
 
 Scores Block, Stripe{1}, BandedStripe{2}, BandedStripe{3} by makespan
-(work + transit) and reports the winner. Logs only the winner to Rerun
-plus all candidates under `enu/candidates/...`.
-
-Logs to `maptrax_optimized_py`.
+(work + transit) and reports the winner. Logs the winner + every
+candidate to Rerun `maptrax_optimized_py` in both 2D and map views.
 """
 
 import rerun as rr
@@ -14,9 +12,9 @@ import maptrax
 from _common import (
     BIG_IRREGULAR_FIELD,
     DATUM,
-    arc_polyline,
+    log_machine_views,
     machine_color,
-    swath_line,
+    polygon_geo,
 )
 
 
@@ -46,13 +44,20 @@ def _plan_with(planner, extra_kwargs):
 
 def main():
     rr.init("maptrax_optimized_py", spawn=True)
-    rr.log("enu/field/border", rr.LineStrips2D([BIG_IRREGULAR_FIELD + [BIG_IRREGULAR_FIELD[0]]]))
 
     planner = maptrax.Maptrax()
     planner.set_field(BIG_IRREGULAR_FIELD, DATUM)
     planner.generate_field(8.0, 20.0, 3)
 
-    # Score every candidate by running it explicitly.
+    rr.log(
+        "enu/field/border",
+        rr.LineStrips2D([BIG_IRREGULAR_FIELD + [BIG_IRREGULAR_FIELD[0]]]),
+    )
+    rr.log(
+        "geo/field/border",
+        rr.GeoLineStrings(lat_lon=[polygon_geo(planner, BIG_IRREGULAR_FIELD)]),
+    )
+
     scored = []
     for label, kwargs in CANDIDATES:
         plan = _plan_with(planner, kwargs)
@@ -62,7 +67,6 @@ def main():
         total_transit = sum(transits)
         scored.append((label, kwargs, plan, makespan, total_transit))
 
-    # Let Maptrax pick the winner under the Optimized pattern.
     winner_plan = _plan_with(planner, {"pattern": "optimized_makespan"})
     winner_pattern = winner_plan.get("pattern_used", "Unknown")
 
@@ -77,40 +81,20 @@ def main():
         )
     print(f"\n   Winner: {winner_pattern}")
 
-    # Render the winner's per-machine swaths + tour.
     for machine in winner_plan["machines"]:
-        color = machine_color(machine["machine_index"])
-        rr.log(
-            f"enu/winner/m{machine['machine_index']}/swaths",
-            rr.LineStrips2D(
-                [swath_line(s) for s in machine["assigned_swaths"]], colors=[color]
-            ),
-        )
-        rr.log(
-            f"enu/winner/m{machine['machine_index']}/tour",
-            rr.LineStrips2D(
-                [swath_line(s) for s in machine["tour"]], colors=[color]
-            ),
-        )
-        rr.log(
-            f"enu/winner/m{machine['machine_index']}/headlands",
-            rr.LineStrips2D(
-                [arc_polyline(a) for a in machine["assigned_headland_arcs"]],
-                colors=[color],
-            ),
-        )
+        idx = machine["machine_index"]
+        log_machine_views(rr, planner, f"winner/m{idx}", machine, machine_color(idx))
 
-    # Also push every candidate under enu/candidates/... for side-by-side view.
     for label, _kwargs, plan, _makespan, _transit in scored:
         slug = label.lower().replace("{", "").replace("}", "").replace(":", "")
         for machine in plan["machines"]:
-            color = machine_color(machine["machine_index"])
-            rr.log(
-                f"enu/candidates/{slug}/m{machine['machine_index']}/swaths",
-                rr.LineStrips2D(
-                    [swath_line(s) for s in machine["assigned_swaths"]],
-                    colors=[color],
-                ),
+            idx = machine["machine_index"]
+            log_machine_views(
+                rr,
+                planner,
+                f"candidates/{slug}/m{idx}",
+                machine,
+                machine_color(idx),
             )
 
 

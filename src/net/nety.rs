@@ -360,6 +360,7 @@ fn build_connection_augmented_order(traversal: Vec<Swath>) -> Vec<Swath> {
                 id: -1,
                 width: 0.0,
                 points: vec![swath.tail(), next.head()],
+                point_reverse: Vec::new(),
             };
             ordered.push(connection);
         }

@@ -34,6 +34,12 @@ pub struct Swath {
     pub id: i32,
     pub width: f64,
     pub points: Vec<Point>,
+    /// Parallel to `points` when present; `true` means the machine is
+    /// reversing at that waypoint. An empty vec means "all forward"
+    /// (the common case — swaths, headlands, Dubins, Sharper, straight
+    /// connectors are never reverse). Populated only by Reeds-Shepp
+    /// connectors that contain reverse segments.
+    pub point_reverse: Vec<bool>,
 }
 
 impl Swath {
@@ -188,6 +194,7 @@ pub fn create_swath(
         id: -1,
         width: 0.0,
         points,
+        point_reverse: Vec::new(),
     }
 }
 
@@ -725,6 +732,7 @@ fn create_indexed_swath(
         id: swath_id,
         width: swath_width,
         points,
+        point_reverse: Vec::new(),
     }
 }
 

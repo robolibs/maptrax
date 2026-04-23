@@ -2,6 +2,8 @@ import rerun as rr
 
 import maptrax
 
+from _common import log_machine_views, polygon_geo
+
 
 DATUM = (51.98954034749562, 5.6584737410504715, 53.801823)
 FIELD = [
@@ -13,10 +15,6 @@ FIELD = [
     (-249.8, -6.7),
     (-173.5, -153.4),
 ]
-
-
-def swath_line(swath):
-    return [[float(x), float(y)] for x, y in swath["points"]]
 
 
 def rgb(index):
@@ -46,29 +44,16 @@ machine_plan = planner.plan_machines(
 
 rr.init("maptrax_python_main", spawn=True)
 
-rr.log("field/border", rr.LineStrips2D([FIELD + [FIELD[0]]]))
+# Field border — both views.
+rr.log("enu/field/border", rr.LineStrips2D([FIELD + [FIELD[0]]]))
+rr.log(
+    "geo/field/border",
+    rr.GeoLineStrings(lat_lon=[polygon_geo(planner, FIELD)]),
+)
 
 for machine in machine_plan["machines"]:
-    color = rgb(machine["machine_index"])
-    rr.log(
-        f"machines/{machine['machine_index']}/assigned",
-        rr.LineStrips2D([swath_line(swath) for swath in machine["assigned_swaths"]], colors=[color]),
-    )
-    rr.log(
-        f"machines/{machine['machine_index']}/ordered",
-        rr.LineStrips2D([swath_line(swath) for swath in machine["ordered_swaths"]], colors=[color]),
-    )
-    rr.log(
-        f"machines/{machine['machine_index']}/tour",
-        rr.LineStrips2D([swath_line(swath) for swath in machine["tour"]], colors=[color]),
-    )
-    rr.log(
-        f"machines/{machine['machine_index']}/headlands",
-        rr.LineStrips2D(
-            [[[float(x), float(y)] for x, y in arc] for arc in machine["assigned_headland_arcs"]],
-            colors=[color],
-        ),
-    )
+    idx = machine["machine_index"]
+    log_machine_views(rr, planner, f"machines/m{idx}", machine, rgb(idx))
 
 print(f"Field area: {planner.total_area():.1f} m^2")
 for machine in machine_plan["machines"]:

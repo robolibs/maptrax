@@ -1,14 +1,12 @@
-"""AutoSplit + 3-machine fleet demo.
+"""AutoSplit + 3-machine fleet demo, with both 2D and map views.
 
-The big irregular field is auto-split into sub-fields (longer AABB side
-larger than max_side triggers a bisect). Each sub-field then runs the
-same 3-machine Block+ByLength plan; each physical machine's tour is the
-concatenation of its per-sub-field shares.
+Large irregular field auto-splits into sub-fields (longer AABB side
+larger than max_side triggers a bisect). The same 3-machine
+Block+ByLength plan runs on each sub-field; each physical machine's
+tour concatenates its per-sub-field work.
 
-One sub-field OWNS the midline headland (its rings extend all the way to
-the split). The other sub-field's headland rings skip the inset along
-the split — its swaths reach the split line directly and use the
-neighbour's headland for turns.
+One sub-field OWNS the midline headland; the other reaches the split
+line directly and uses the neighbour's turn space.
 
 Logs to `maptrax_split_field_py`.
 """
@@ -21,9 +19,13 @@ from _common import (
     BIG_IRREGULAR_FIELD,
     DATUM,
     arc_polyline,
+    arc_polyline_geo,
+    log_machine_views,
     machine_color,
+    polygon_geo,
     segment_length,
     swath_line,
+    swath_line_geo,
 )
 
 
@@ -40,12 +42,29 @@ def ring_polyline(ring):
     return points
 
 
+def ring_polyline_geo(planner, ring):
+    closed_xy = list(ring["points"])
+    if closed_xy and closed_xy[0] != closed_xy[-1]:
+        closed_xy.append(closed_xy[0])
+    latlon = planner.enu_to_wgs_batch([(float(x), float(y)) for x, y in closed_xy])
+    return [[lat, lon] for (lat, lon) in latlon]
+
+
 def main():
     rr.init("maptrax_split_field_py", spawn=True)
-    rr.log("enu/field/border", rr.LineStrips2D([BIG_IRREGULAR_FIELD + [BIG_IRREGULAR_FIELD[0]]]))
 
     planner = maptrax.Maptrax()
     planner.set_field(BIG_IRREGULAR_FIELD, DATUM)
+
+    rr.log(
+        "enu/field/border",
+        rr.LineStrips2D([BIG_IRREGULAR_FIELD + [BIG_IRREGULAR_FIELD[0]]]),
+    )
+    rr.log(
+        "geo/field/border",
+        rr.GeoLineStrings(lat_lon=[polygon_geo(planner, BIG_IRREGULAR_FIELD)]),
+    )
+
     part_count = planner.plan_field(
         swath_width=SWATH_WIDTH,
         angle_degrees=20.0,
@@ -57,23 +76,28 @@ def main():
     print("   Field extent: ~950m x ~495m (irregular 8-vertex polygon)")
     print(f"   Split into {part_count} sub-field(s).\n")
 
-    # Headland rings per sub-field. Owner rings close around the split;
-    # non-owner rings have their split-side snapped to the split line.
+    ring_color = (120, 120, 160)
     for part_index in range(part_count):
         part = planner.get_part(part_index)
         for ring_index, ring in enumerate(part["headlands"]):
             rr.log(
                 f"enu/parts/part_{part_index}/headland_{ring_index}",
-                rr.LineStrips2D([ring_polyline(ring)], colors=[(120, 120, 160)]),
+                rr.LineStrips2D([ring_polyline(ring)], colors=[ring_color]),
+            )
+            rr.log(
+                f"geo/parts/part_{part_index}/headland_{ring_index}",
+                rr.GeoLineStrings(
+                    lat_lon=[ring_polyline_geo(planner, ring)],
+                    colors=[ring_color],
+                ),
             )
         non_owned = part["non_owned_splits"]
         if non_owned:
             print(
-                f"   part {part_index} is NON-OWNER of {len(non_owned)} split(s) — "
-                f"swaths reach: {', '.join(f'{s[\"axis\"]}={s[\"position\"]:.1f}' for s in non_owned)}"
+                f"   part {part_index} is NON-OWNER of {len(non_owned)} split(s)"
             )
         else:
-            print(f"   part {part_index} OWNS its splits (midline headlands inset fully)")
+            print(f"   part {part_index} OWNS its splits (midline headland inset fully)")
 
     all_plans = planner.plan_machines_all_parts(
         machines=FLEET_SIZE,
@@ -88,7 +112,6 @@ def main():
         machine_width=3.0,
     )
 
-    # Concat each physical machine's work across sub-fields.
     per_machine_swaths = [[] for _ in range(FLEET_SIZE)]
     per_machine_tour = [[] for _ in range(FLEET_SIZE)]
     per_machine_headlands = [[] for _ in range(FLEET_SIZE)]
@@ -101,13 +124,21 @@ def main():
             per_machine_headlands[idx].extend(machine["assigned_headland_arcs"])
 
             color = machine_color(idx)
-            rr.log(
-                f"enu/parts/part_{part_index}/m{idx}/swaths",
-                rr.LineStrips2D(
-                    [swath_line(s) for s in machine["assigned_swaths"]],
-                    colors=[color],
-                ),
-            )
+            if machine["assigned_swaths"]:
+                rr.log(
+                    f"enu/parts/part_{part_index}/m{idx}/swaths",
+                    rr.LineStrips2D(
+                        [swath_line(s) for s in machine["assigned_swaths"]],
+                        colors=[color],
+                    ),
+                )
+                rr.log(
+                    f"geo/parts/part_{part_index}/m{idx}/swaths",
+                    rr.GeoLineStrings(
+                        lat_lon=[swath_line_geo(planner, s) for s in machine["assigned_swaths"]],
+                        colors=[color] * len(machine["assigned_swaths"]),
+                    ),
+                )
 
     print()
     print(
@@ -131,29 +162,17 @@ def main():
         makespan = max(makespan, work_s)
         total_work += work_len
 
-        color = machine_color(idx)
-        rr.log(
-            f"enu/machines/m{idx}/swaths",
-            rr.LineStrips2D(
-                [swath_line(s) for s in per_machine_swaths[idx]], colors=[color]
-            ),
-        )
-        rr.log(
-            f"enu/machines/m{idx}/tour",
-            rr.LineStrips2D(
-                [swath_line(s) for s in per_machine_tour[idx]], colors=[color]
-            ),
-        )
-        rr.log(
-            f"enu/machines/m{idx}/headlands",
-            rr.LineStrips2D(
-                [arc_polyline(a) for a in per_machine_headlands[idx]],
-                colors=[color],
-            ),
-        )
+        fake_machine = {
+            "assigned_swaths": per_machine_swaths[idx],
+            "tour": per_machine_tour[idx],
+            "assigned_headland_arcs": per_machine_headlands[idx],
+        }
+        log_machine_views(rr, planner, f"machines/m{idx}", fake_machine, machine_color(idx))
 
     print(f"\n   Total work length: {total_work:.1f} m")
-    print(f"   Makespan: {makespan:.1f}s   ({FLEET_SIZE} machines across {part_count} sub-field(s))")
+    print(
+        f"   Makespan: {makespan:.1f}s   ({FLEET_SIZE} machines across {part_count} sub-field(s))"
+    )
 
 
 if __name__ == "__main__":

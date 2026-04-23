@@ -390,7 +390,14 @@ impl Maptrax {
             let mut nety = Nety::new(&assigned_swaths);
             nety.field_traversal_with_options(None, routing);
             let ordered_swaths = ordered_work_swaths(nety.get_swaths());
-            let tour = TourBuilder::build(&part, &ordered_swaths, turn);
+            // Include the machine's assigned headland rings as driven
+            // work at the start of the tour.
+            let tour = TourBuilder::build_with_headlands(
+                &part,
+                &assigned_headland_arcs,
+                &ordered_swaths,
+                turn,
+            );
 
             machines.push(MachinePlannedPart {
                 machine_index,

@@ -397,6 +397,29 @@ impl PyMaptrax {
         Ok(self.inner.field().map_err(py_err)?.total_area())
     }
 
+    /// Convert a local ENU (x, y) coordinate to (latitude, longitude)
+    /// using the field's datum. Use this to build geo polylines for
+    /// Rerun's `GeoLineStrings` when drawing map views.
+    fn enu_to_wgs(&self, x: f64, y: f64) -> PyResult<(f64, f64)> {
+        let datum = self.inner.field().map_err(py_err)?.datum();
+        let wgs = concord::to_wgs_from_enu(concord::Enu::new(x, y, 0.0, datum));
+        Ok((wgs.latitude, wgs.longitude))
+    }
+
+    /// Batch version of `enu_to_wgs`. Accepts a list of (x, y) tuples;
+    /// returns a list of (lat, lon) tuples. Faster than calling
+    /// `enu_to_wgs` in a loop when you have a long polyline.
+    fn enu_to_wgs_batch(&self, points: Vec<(f64, f64)>) -> PyResult<Vec<(f64, f64)>> {
+        let datum = self.inner.field().map_err(py_err)?.datum();
+        Ok(points
+            .into_iter()
+            .map(|(x, y)| {
+                let wgs = concord::to_wgs_from_enu(concord::Enu::new(x, y, 0.0, datum));
+                (wgs.latitude, wgs.longitude)
+            })
+            .collect())
+    }
+
     fn part_count(&self) -> PyResult<usize> {
         Ok(self.inner.field().map_err(py_err)?.parts().len())
     }

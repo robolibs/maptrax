@@ -83,16 +83,153 @@ impl TourBuilder {
 
         out
     }
+
+    /// Build a complete machine tour that INCLUDES driving the assigned
+    /// headland rings as work, before transitioning to the interior swaths.
+    /// Output sequence:
+    ///   1. For each headland arc (outermost → inner), drive it as a
+    ///      `SwathType::Headland` segment with a connector between arcs.
+    ///   2. Connector from last headland arc to the first interior swath.
+    ///   3. Interior swaths (same as `build`) with their normal connectors.
+    ///
+    /// Falls back to `build` when no headland arcs are supplied.
+    pub fn build_with_headlands(
+        part: &Part,
+        headland_arcs: &[Vec<Point>],
+        ordered_swaths: &[Swath],
+        cfg: &TurnPlannerConfig,
+    ) -> Vec<Swath> {
+        if headland_arcs.is_empty() {
+            return Self::build(part, ordered_swaths, cfg);
+        }
+
+        let work_area = innermost_headland_ring(part);
+        let mut out: Vec<Swath> = Vec::new();
+
+        for arc in headland_arcs {
+            if arc.len() < 2 {
+                continue;
+            }
+
+            if let Some(prev) = out.last() {
+                if let Some(conn) = build_connector(prev, arc[0], arc[1], work_area, cfg) {
+                    out.push(conn);
+                }
+            }
+
+            let mut swath = create_swath(
+                arc[0],
+                *arc.last().unwrap(),
+                SwathType::Headland,
+                String::new(),
+            );
+            swath.points = arc.clone();
+            swath.bounding_box = aabb_from_points(arc);
+            out.push(swath);
+        }
+
+        // Hand-off from the last driven headland ring to the first interior
+        // swath. A direct Dubins arc can fly straight across the field when
+        // the headland endpoint and the swath head sit on opposite sides of
+        // the innermost ring. Walk along the innermost ring instead — that
+        // path stays on the boundary and can never cut through the crop.
+        if let (Some(last_hdl), Some(first_sw)) = (out.last().cloned(), ordered_swaths.first()) {
+            let from_end = last_hdl.tail();
+            let to_start = first_sw.head();
+            if !points_equal(from_end, to_start, 1e-6) {
+                let inner_polygon: &Polygon = part
+                    .headlands
+                    .last()
+                    .map(|ring| &ring.polygon)
+                    .unwrap_or(&part.boundary.polygon);
+                if let (Some(start_proj), Some(goal_proj)) = (
+                    project_to_ring(inner_polygon, from_end),
+                    project_to_ring(inner_polygon, to_start),
+                ) {
+                    let ring_path = shorter_ring_path(inner_polygon, start_proj, goal_proj);
+                    let mut ring_path = smooth_headland_path(&ring_path, cfg);
+                    // Force endpoints to match the actual previous segment's
+                    // tail and next swath's head so the tour stays gap-free.
+                    if let Some(first) = ring_path.first().copied() {
+                        if !points_equal(first, from_end, 1e-6) {
+                            ring_path.insert(0, from_end);
+                        }
+                    } else {
+                        ring_path.push(from_end);
+                    }
+                    if let Some(last) = ring_path.last().copied() {
+                        if !points_equal(last, to_start, 1e-6) {
+                            ring_path.push(to_start);
+                        }
+                    }
+                    if ring_path.len() >= 2 {
+                        let mut ring_swath = create_swath(
+                            ring_path[0],
+                            *ring_path.last().unwrap(),
+                            SwathType::Connection,
+                            String::new(),
+                        );
+                        ring_swath.bounding_box = aabb_from_points(&ring_path);
+                        ring_swath.points = ring_path;
+                        out.push(ring_swath);
+                    }
+                }
+            }
+        }
+
+        out.extend(Self::build(part, ordered_swaths, cfg));
+        out
+    }
 }
 
-/// Outermost headland ring — used for routing along the headland band.
-/// This is the ring closest to the field boundary, giving maximum turning
-/// clearance. Falls back to the field boundary if there are no headlands.
+fn build_connector(
+    prev: &Swath,
+    next_start: Point,
+    next_second: Point,
+    work_area: Option<&Polygon>,
+    cfg: &TurnPlannerConfig,
+) -> Option<Swath> {
+    if points_equal(prev.tail(), next_start, 1e-6) {
+        return None;
+    }
+    let from_heading = if prev.points.len() >= 2 {
+        heading_between(
+            prev.points[prev.points.len() - 2],
+            *prev.points.last().unwrap(),
+        )
+    } else {
+        heading_between(prev.head(), prev.tail())
+    };
+    let to_heading = heading_between(next_start, next_second);
+    let mut connector = direct_connection_swath_points(
+        prev.tail(),
+        from_heading,
+        next_start,
+        to_heading,
+        work_area,
+        cfg,
+    )?;
+    connector.r#type = SwathType::Connection;
+    Some(connector)
+}
+
+/// The headland ring that connectors route along when transitioning
+/// between swaths. Needs to be FARTHER from the swath endpoints than the
+/// innermost ring — otherwise the enter/exit Dubins arcs collapse to
+/// zero and you get no visible turn geometry. Rule:
+///   * 0 rings           → field boundary
+///   * 1-2 rings         → outermost (`headlands.first()`)
+///   * 3 or more rings   → middle (`headlands[len / 2]`)
+/// With 3+ rings the middle option gives a shorter, more realistic
+/// detour than the outermost while still leaving turn room.
 fn outer_headland_ring(part: &Part) -> &Polygon {
-    part.headlands
-        .first()
-        .map(|ring| &ring.polygon)
-        .unwrap_or(&part.boundary.polygon)
+    if part.headlands.is_empty() {
+        return &part.boundary.polygon;
+    }
+    if part.headlands.len() >= 3 {
+        return &part.headlands[part.headlands.len() / 2].polygon;
+    }
+    &part.headlands[0].polygon
 }
 
 /// Innermost headland ring — the boundary of the work area. Turn arcs must
@@ -258,59 +395,77 @@ fn direct_connection_swath_points(
     let start = Pose2D::from_point(start_point, start_yaw);
     let goal = Pose2D::from_point(goal_point, goal_yaw);
 
-    // Enumerate candidate paths so we can filter out ones that cut through
-    // the work area (already-driven swaths). For Sharper we only have one.
-    let candidates: Vec<Vec<Point>> = match cfg.model {
+    // Enumerate candidate (waypoints, reverse_flags) pairs. For
+    // Dubins/Sharper everything is forward (reverse_flags = all false).
+    // For Reeds-Shepp the planner reports per-waypoint reverse state.
+    let candidates: Vec<(Vec<Point>, Vec<bool>)> = match cfg.model {
         TurnPlannerModel::Dubins => Dubins::new(cfg.min_turning_radius)
             .get_all_paths(start, goal, cfg.step_size)
             .into_iter()
             .filter(|path| !path.waypoints.is_empty())
-            .map(|path| path.waypoints.into_iter().map(|pose| pose.point).collect())
+            .map(|path| {
+                let pts: Vec<Point> = path.waypoints.into_iter().map(|p| p.point).collect();
+                let n = pts.len();
+                (pts, vec![false; n])
+            })
             .collect(),
         TurnPlannerModel::ReedsShepp => ReedsShepp::new(cfg.min_turning_radius)
             .get_all_paths(start, goal, cfg.step_size)
             .into_iter()
             .filter(|path| !path.waypoints.is_empty())
-            .map(|path| path.waypoints.into_iter().map(|pose| pose.point).collect())
+            .map(|path| {
+                let pts: Vec<Point> = path.waypoints.into_iter().map(|p| p.point).collect();
+                let mut rev = path.waypoint_reverse;
+                if rev.len() != pts.len() {
+                    rev.resize(pts.len(), false);
+                }
+                (pts, rev)
+            })
             .collect(),
-        TurnPlannerModel::Sharper => vec![
-            Sharper::new(
+        TurnPlannerModel::Sharper => {
+            let waypoints = Sharper::new(
                 cfg.min_turning_radius,
                 cfg.machine_length,
                 cfg.machine_width,
             )
             .plan_sharp_turn(start, goal, &cfg.sharper_pattern)
-            .waypoints
-            .into_iter()
-            .map(|pose| pose.point)
-            .collect(),
-        ],
+            .waypoints;
+            let pts: Vec<Point> = waypoints.into_iter().map(|p| p.point).collect();
+            let n = pts.len();
+            vec![(pts, vec![false; n])]
+        }
         TurnPlannerModel::Auto => {
             if point_distance(start.point, goal.point) < cfg.min_turning_radius * 0.25 {
-                vec![
-                    Sharper::new(
-                        cfg.min_turning_radius,
-                        cfg.machine_length,
-                        cfg.machine_width,
-                    )
-                    .plan_sharp_turn(start, goal, &cfg.sharper_pattern)
-                    .waypoints
-                    .into_iter()
-                    .map(|pose| pose.point)
-                    .collect(),
-                ]
+                let waypoints = Sharper::new(
+                    cfg.min_turning_radius,
+                    cfg.machine_length,
+                    cfg.machine_width,
+                )
+                .plan_sharp_turn(start, goal, &cfg.sharper_pattern)
+                .waypoints;
+                let pts: Vec<Point> = waypoints.into_iter().map(|p| p.point).collect();
+                let n = pts.len();
+                vec![(pts, vec![false; n])]
             } else {
                 ReedsShepp::new(cfg.min_turning_radius)
                     .get_all_paths(start, goal, cfg.step_size)
                     .into_iter()
                     .filter(|path| !path.waypoints.is_empty())
-                    .map(|path| path.waypoints.into_iter().map(|pose| pose.point).collect())
+                    .map(|path| {
+                        let pts: Vec<Point> =
+                            path.waypoints.into_iter().map(|p| p.point).collect();
+                        let mut rev = path.waypoint_reverse;
+                        if rev.len() != pts.len() {
+                            rev.resize(pts.len(), false);
+                        }
+                        (pts, rev)
+                    })
                     .collect()
             }
         }
     };
 
-    let polyline = select_best_path(candidates, work_area)?;
+    let (polyline, reverse_flags) = select_best_path(candidates, work_area)?;
     if polyline.len() < 2 {
         return straight_connection_swath(start_point, goal_point);
     }
@@ -327,6 +482,7 @@ fn direct_connection_swath_points(
         SwathType::Connection,
         "",
     );
+    swath.point_reverse = reverse_flags;
     swath.points = polyline.clone();
     swath.bounding_box = aabb_from_points(&polyline);
     Some(swath)
@@ -337,46 +493,64 @@ fn direct_connection_swath_points(
 /// (swaths start/end there). If no candidate is clean, fall back to the
 /// shortest one so we always return something.
 fn select_best_path(
-    candidates: Vec<Vec<Point>>,
+    candidates: Vec<(Vec<Point>, Vec<bool>)>,
     work_area: Option<&Polygon>,
-) -> Option<Vec<Point>> {
+) -> Option<(Vec<Point>, Vec<bool>)> {
     if candidates.is_empty() {
         return None;
     }
 
-    let mut clean: Vec<Vec<Point>> = Vec::new();
-    let mut all: Vec<Vec<Point>> = Vec::new();
-    for candidate in candidates {
-        if candidate.len() < 2 {
+    let mut clean: Vec<(Vec<Point>, Vec<bool>)> = Vec::new();
+    let mut all: Vec<(Vec<Point>, Vec<bool>)> = Vec::new();
+    for (points, reverse) in candidates {
+        if points.len() < 2 {
             continue;
         }
         let clean_of_work_area = match work_area {
-            Some(polygon) => path_stays_outside(&candidate, polygon),
+            Some(polygon) => path_stays_outside(&points, polygon),
             None => true,
         };
         if clean_of_work_area {
-            clean.push(candidate.clone());
+            clean.push((points.clone(), reverse.clone()));
         }
-        all.push(candidate);
+        all.push((points, reverse));
     }
 
     let pool = if clean.is_empty() { all } else { clean };
-    pool.into_iter().min_by(|a, b| {
+    pool.into_iter().min_by(|(a, _), (b, _)| {
         polyline_length(a)
             .partial_cmp(&polyline_length(b))
             .unwrap_or(std::cmp::Ordering::Equal)
     })
 }
 
-/// Check whether the interior of `path` (everything except the first and last
-/// points) stays out of `polygon`. The endpoints are allowed to sit on or
-/// just inside the polygon's boundary because swaths live on/inside it.
+/// Check whether `path` stays out of `polygon` — tested along each segment,
+/// not just at the waypoints. The caller's endpoints (first and last
+/// points) may sit on the polygon boundary (swath endpoints sit on the
+/// ring edge by construction) so those are skipped; everything between
+/// is sampled at `SAMPLE_STEP` intervals and rejected if strictly inside.
 fn path_stays_outside(path: &[Point], polygon: &Polygon) -> bool {
-    if path.len() <= 2 {
+    if path.len() < 2 {
         return true;
     }
-    for point in &path[1..path.len() - 1] {
-        if point_strictly_inside(*point, polygon) {
+    const SAMPLE_STEP: f64 = 0.1;
+    let last_idx = path.len() - 1;
+    for (i, pair) in path.windows(2).enumerate() {
+        let a = pair[0];
+        let b = pair[1];
+        let len = point_distance(a, b);
+        let samples = ((len / SAMPLE_STEP).ceil() as usize).max(1);
+        // Sample the interior of each segment (skip endpoints; the next
+        // segment's endpoint check covers them).
+        for s in 1..samples {
+            let t = s as f64 / samples as f64;
+            let p = Point::new(a.x() + t * (b.x() - a.x()), a.y() + t * (b.y() - a.y()));
+            if point_strictly_inside(p, polygon) {
+                return false;
+            }
+        }
+        // Check `b` unless it's the final endpoint of the whole path.
+        if i + 1 < last_idx && point_strictly_inside(b, polygon) {
             return false;
         }
     }

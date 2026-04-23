@@ -66,6 +66,35 @@ pub fn log_polylines(
     Ok(())
 }
 
+/// Geo-coded counterpart to `log_polylines`. Each local-ENU polyline is
+/// converted to lat/lon via the datum and logged as `GeoLineStrings`.
+pub fn log_polylines_geo(
+    rec: &RecordingStream,
+    path: &str,
+    polylines: &[Vec<Point<f64>>],
+    datum: Geo,
+    color: (u8, u8, u8),
+) -> Result<(), Box<dyn Error>> {
+    let strips: Vec<Vec<[f64; 2]>> = polylines
+        .iter()
+        .filter(|arc| arc.len() >= 2)
+        .map(|arc| {
+            arc.iter()
+                .map(|point| point_geo(*point, datum))
+                .collect()
+        })
+        .collect();
+    if strips.is_empty() {
+        return Ok(());
+    }
+    let colors: Vec<Color> = strips
+        .iter()
+        .map(|_| Color::from_rgb(color.0, color.1, color.2))
+        .collect();
+    rec.log(path, &GeoLineStrings::from_lat_lon(strips).with_colors(colors))?;
+    Ok(())
+}
+
 fn log_swaths_with_palette(
     rec: &RecordingStream,
     path: &str,
