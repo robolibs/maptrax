@@ -342,15 +342,12 @@ fn upstream_example_surface_remains_visually_sane() {
         .map(|machine| machine.ordered_swaths.len())
         .collect::<Vec<_>>();
     assert_eq!(ordered_counts, vec![18, 18, 18, 17]);
-    assert!(
-        machine_plan
-            .machines
+    assert!(machine_plan.machines.iter().all(|machine| {
+        machine
+            .ordered_swaths
             .iter()
-            .all(|machine| machine
-                .ordered_swaths
-                .iter()
-                .all(|swath| swath.r#type == SwathType::Swath))
-    );
+            .all(|swath| swath.r#type == SwathType::Swath)
+    }));
     assert!(
         machine_plan
             .machines

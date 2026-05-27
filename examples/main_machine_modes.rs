@@ -72,7 +72,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut planner = Maptrax::new();
         planner.set_field_object(field.clone());
         let planned = planner.plan_machines_for_part(
-            &MachinePlanningOptions { plan, part_index: 0 },
+            &MachinePlanningOptions {
+                plan,
+                part_index: 0,
+            },
             RoutingOptions {
                 strategy: RoutingStrategy::GreedyNearest,
                 local_improvement_passes: 1,

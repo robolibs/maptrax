@@ -2,8 +2,7 @@ use concord::Geo;
 use geo::Point;
 use maptrax::{
     FieldGenerationMode, FieldGenerationOptions, Maptrax, PlannerOptions, TurnPlannerConfig,
-    TurnPlannerModel,
-    polygon_from_points,
+    TurnPlannerModel, polygon_from_points,
 };
 
 fn main() {

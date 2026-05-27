@@ -6,7 +6,11 @@ use maptrax::{
 };
 
 fn stripe_plan(machines: usize) -> DivisionPlan {
-    DivisionPlan::uniform(machines, DivisionPattern::Stripe { stride: 1 }, Balance::ByCount)
+    DivisionPlan::uniform(
+        machines,
+        DivisionPattern::Stripe { stride: 1 },
+        Balance::ByCount,
+    )
 }
 
 fn rect() -> Polygon {
@@ -143,11 +147,7 @@ fn upstream_main_cpp_flow_matches_probe_counts() {
     field.gen_field(4.0, 0.0, 3).expect("generated");
 
     let division = Divy::plan(&field.get_parts()[0], &stripe_plan(4)).expect("divy");
-    let assigned: Vec<usize> = division
-        .swaths_per_machine
-        .iter()
-        .map(Vec::len)
-        .collect();
+    let assigned: Vec<usize> = division.swaths_per_machine.iter().map(Vec::len).collect();
     assert_eq!(assigned, vec![18, 18, 18, 17]);
 
     let mut nety = Nety::new(&field.get_parts()[0].swaths);

@@ -210,9 +210,7 @@ fn staged_tour_replaces_graph_connections_with_turner_geometry() {
         .collect::<Vec<_>>();
     assert!(!turner_segments.is_empty());
     assert!(
-        turner_segments
-            .iter()
-            .any(|swath| swath.points.len() > 2),
+        turner_segments.iter().any(|swath| swath.points.len() > 2),
         "tour still contains only straight placeholder connectors"
     );
     assert!(part.tour.len() > part.ordered_swaths.len());

@@ -12,7 +12,7 @@
 #[path = "support/rerun_viz.rs"]
 mod rerun_viz;
 
-use std::fs::{create_dir_all, File};
+use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write};
 
 use concord::Geo;
@@ -82,7 +82,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let planned = mt.plan_machines_for_part(
-        &MachinePlanningOptions { plan, part_index: 0 },
+        &MachinePlanningOptions {
+            plan,
+            part_index: 0,
+        },
         routing,
         &turn,
     )?;
@@ -177,7 +180,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // The flat polyline — exactly what went into the CSV — logged as one
     // continuous strip so you can scrub through it in Rerun.
-    rerun_viz::log_polylines(&rec, "enu/route_polyline", &[polyline.clone()], (240, 200, 60))?;
+    rerun_viz::log_polylines(
+        &rec,
+        "enu/route_polyline",
+        &[polyline.clone()],
+        (240, 200, 60),
+    )?;
     rerun_viz::log_polylines_geo(
         &rec,
         "geo/route_polyline",
@@ -192,12 +200,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // as reverse.
     let (forward_runs, reverse_runs) = split_forward_reverse_by_segment(&machine.tour);
     if !forward_runs.is_empty() {
-        rerun_viz::log_polylines(
-            &rec,
-            "enu/route/forward",
-            &forward_runs,
-            (80, 200, 120),
-        )?;
+        rerun_viz::log_polylines(&rec, "enu/route/forward", &forward_runs, (80, 200, 120))?;
         rerun_viz::log_polylines_geo(
             &rec,
             "geo/route/forward",
@@ -207,12 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
     }
     if !reverse_runs.is_empty() {
-        rerun_viz::log_polylines(
-            &rec,
-            "enu/route/reverse",
-            &reverse_runs,
-            (230, 60, 60),
-        )?;
+        rerun_viz::log_polylines(&rec, "enu/route/reverse", &reverse_runs, (230, 60, 60))?;
         rerun_viz::log_polylines_geo(
             &rec,
             "geo/route/reverse",

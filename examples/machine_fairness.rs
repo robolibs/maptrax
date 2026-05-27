@@ -9,9 +9,8 @@
 mod example_scenes;
 
 use maptrax::{
-    Balance, DivisionPattern, DivisionPlan, Field, MachineProfile, Maptrax,
-    MachinePlanningOptions, OptimizeObjective, RoutingOptions,
-    RoutingStrategy, TurnPlannerConfig, segment_length,
+    Balance, DivisionPattern, DivisionPlan, Field, MachinePlanningOptions, MachineProfile, Maptrax,
+    OptimizeObjective, RoutingOptions, RoutingStrategy, TurnPlannerConfig, segment_length,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,9 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let part = &field.get_parts()[0];
     let total_swaths = part.swaths.len();
     let total_length: f64 = part.swaths.iter().map(|s| segment_length(s.line)).sum();
-    println!(
-        "Field: {total_swaths} swaths, total work length = {total_length:.1} m\n"
-    );
+    println!("Field: {total_swaths} swaths, total work length = {total_length:.1} m\n");
 
     let scenarios: Vec<(String, DivisionPlan)> = vec![
         (
@@ -82,7 +79,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut planner = Maptrax::new();
         planner.set_field_object(field.clone());
         let planned = planner.plan_machines_for_part(
-            &MachinePlanningOptions { plan, part_index: 0 },
+            &MachinePlanningOptions {
+                plan,
+                part_index: 0,
+            },
             RoutingOptions {
                 strategy: RoutingStrategy::GreedyNearest,
                 local_improvement_passes: 1,
@@ -132,9 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_time = max_time.max(work_time);
         }
         let total_transit: f64 = planned.division.estimated_transit.iter().sum();
-        println!(
-            "   makespan(s): {max_time:.1}   total_transit(m): {total_transit:.1}\n"
-        );
+        println!("   makespan(s): {max_time:.1}   total_transit(m): {total_transit:.1}\n");
     }
 
     Ok(())

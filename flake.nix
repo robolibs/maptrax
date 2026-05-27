@@ -32,9 +32,11 @@
             pkgs.pkg-config
             pkgs.stdenv.cc.cc.lib
             pkgs.zlib
+            pkgs.can-utils
             python
             python.pkgs.pip
             python.pkgs.virtualenv
+            python.pkgs.python-can
             pkgs.maturin
           ];
 

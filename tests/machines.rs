@@ -6,7 +6,11 @@ use maptrax::{
 };
 
 fn stripe_1_by_count(machines: usize) -> DivisionPlan {
-    DivisionPlan::uniform(machines, DivisionPattern::Stripe { stride: 1 }, Balance::ByCount)
+    DivisionPlan::uniform(
+        machines,
+        DivisionPattern::Stripe { stride: 1 },
+        Balance::ByCount,
+    )
 }
 
 fn rectangular_polygon() -> geo::Polygon<f64> {

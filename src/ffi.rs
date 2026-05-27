@@ -217,7 +217,9 @@ fn planner_from_ptr_mut<'a>(
     Ok(unsafe { &mut *planner })
 }
 
-fn planner_from_ptr<'a>(planner: *const MaptraxPlannerHandle) -> crate::Result<&'a MaptraxPlannerHandle> {
+fn planner_from_ptr<'a>(
+    planner: *const MaptraxPlannerHandle,
+) -> crate::Result<&'a MaptraxPlannerHandle> {
     if planner.is_null() {
         return Err(crate::MaptraxError::InvalidPolygon("null planner handle"));
     }
@@ -227,7 +229,9 @@ fn planner_from_ptr<'a>(planner: *const MaptraxPlannerHandle) -> crate::Result<&
 
 fn coords_from_raw(ptr_coords: *const MaptraxCoord2, len: usize) -> crate::Result<Vec<Point>> {
     if ptr_coords.is_null() {
-        return Err(crate::MaptraxError::InvalidPolygon("null coordinate pointer"));
+        return Err(crate::MaptraxError::InvalidPolygon(
+            "null coordinate pointer",
+        ));
     }
     if len < 3 {
         return Err(crate::MaptraxError::InvalidPolygon(
@@ -236,7 +240,10 @@ fn coords_from_raw(ptr_coords: *const MaptraxCoord2, len: usize) -> crate::Resul
     }
     // SAFETY: caller promises valid contiguous memory with len items.
     let slice = unsafe { std::slice::from_raw_parts(ptr_coords, len) };
-    Ok(slice.iter().map(|coord| Point::new(coord.x, coord.y)).collect())
+    Ok(slice
+        .iter()
+        .map(|coord| Point::new(coord.x, coord.y))
+        .collect())
 }
 
 fn routing_options_from_ffi(options: MaptraxRoutingOptions) -> RoutingOptions {
@@ -450,9 +457,11 @@ pub extern "C" fn maptrax_planner_generate_field(
 ) -> bool {
     let result = (|| {
         let planner = planner_from_ptr_mut(planner)?;
-        planner
-            .planner
-            .generate_field(options.swath_width, options.angle_degrees, options.headland_count)
+        planner.planner.generate_field(
+            options.swath_width,
+            options.angle_degrees,
+            options.headland_count,
+        )
     })();
     bool_result(result)
 }
@@ -808,7 +817,9 @@ pub extern "C" fn maptrax_pose_path_free(handle: *mut MaptraxPosePathHandle) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn maptrax_pose_path_view(handle: *const MaptraxPosePathHandle) -> MaptraxPoseBufferView {
+pub extern "C" fn maptrax_pose_path_view(
+    handle: *const MaptraxPosePathHandle,
+) -> MaptraxPoseBufferView {
     if handle.is_null() {
         return MaptraxPoseBufferView {
             poses: ptr::null(),

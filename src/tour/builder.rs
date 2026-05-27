@@ -284,7 +284,6 @@ fn connect_between_swaths(
     }
 }
 
-
 fn direct_connection_plan(
     from: &Swath,
     to: &Swath,
@@ -452,8 +451,7 @@ fn direct_connection_swath_points(
                     .into_iter()
                     .filter(|path| !path.waypoints.is_empty())
                     .map(|path| {
-                        let pts: Vec<Point> =
-                            path.waypoints.into_iter().map(|p| p.point).collect();
+                        let pts: Vec<Point> = path.waypoints.into_iter().map(|p| p.point).collect();
                         let mut rev = path.waypoint_reverse;
                         if rev.len() != pts.len() {
                             rev.resize(pts.len(), false);

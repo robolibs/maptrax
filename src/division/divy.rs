@@ -187,18 +187,12 @@ impl Divy {
             .collect();
 
         let (swaths_per_machine, pattern_used) = match plan.pattern {
-            DivisionPattern::Optimized { objective } => {
-                optimize_pattern(&ordered, plan, objective)
-            }
+            DivisionPattern::Optimized { objective } => optimize_pattern(&ordered, plan, objective),
             pattern => (apply_pattern(&ordered, plan, pattern), pattern),
         };
 
-        let headland_arcs_per_machine = assign_headlands(
-            &headlands,
-            &swaths_per_machine,
-            &ordered,
-            plan.headlands,
-        );
+        let headland_arcs_per_machine =
+            assign_headlands(&headlands, &swaths_per_machine, &ordered, plan.headlands);
 
         let estimated_work_time: Vec<f64> = swaths_per_machine
             .iter()
@@ -237,7 +231,9 @@ fn apply_pattern(
     match pattern {
         DivisionPattern::Stripe { stride } => stripe_assign(ordered, plan, stride.max(1)),
         DivisionPattern::Block => block_assign(ordered, plan),
-        DivisionPattern::BandedStripe { bands } => banded_stripe_assign(ordered, plan, bands.max(1)),
+        DivisionPattern::BandedStripe { bands } => {
+            banded_stripe_assign(ordered, plan, bands.max(1))
+        }
         DivisionPattern::Optimized { .. } => unreachable!("optimize_pattern unrolls this"),
     }
 }
@@ -403,11 +399,7 @@ fn block_assign(ordered: &[Swath], plan: &DivisionPlan) -> Vec<Vec<Swath>> {
     buckets
 }
 
-fn banded_stripe_assign(
-    ordered: &[Swath],
-    plan: &DivisionPlan,
-    bands: usize,
-) -> Vec<Vec<Swath>> {
+fn banded_stripe_assign(ordered: &[Swath], plan: &DivisionPlan, bands: usize) -> Vec<Vec<Swath>> {
     let machine_count = plan.machine_count();
     if bands <= 1 {
         return block_assign(ordered, plan);
@@ -677,7 +669,10 @@ fn split_ring_into_zone_arcs(
 
         match current_zone {
             Some(z) if z == zone => {
-                if current_arc.last().map_or(true, |p| !points_equal(*p, a, 1e-9)) {
+                if current_arc
+                    .last()
+                    .map_or(true, |p| !points_equal(*p, a, 1e-9))
+                {
                     current_arc.push(a);
                 }
                 current_arc.push(b);
@@ -819,8 +814,9 @@ fn cost_for_objective(
     match objective {
         OptimizeObjective::Makespan => makespan,
         OptimizeObjective::TotalTransit => total_transit,
-        OptimizeObjective::Weighted { makespan: mw, transit: tw } => {
-            (mw * makespan) + (tw * total_transit)
-        }
+        OptimizeObjective::Weighted {
+            makespan: mw,
+            transit: tw,
+        } => (mw * makespan) + (tw * total_transit),
     }
 }

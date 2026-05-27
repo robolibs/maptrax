@@ -296,13 +296,11 @@ fn line_line_intersection(
     p3: Point<f64>,
     p4: Point<f64>,
 ) -> Option<Point<f64>> {
-    let denom =
-        (p1.x() - p2.x()) * (p3.y() - p4.y()) - (p1.y() - p2.y()) * (p3.x() - p4.x());
+    let denom = (p1.x() - p2.x()) * (p3.y() - p4.y()) - (p1.y() - p2.y()) * (p3.x() - p4.x());
     if denom.abs() < 1e-12 {
         return None;
     }
-    let t = ((p1.x() - p3.x()) * (p3.y() - p4.y()) - (p1.y() - p3.y()) * (p3.x() - p4.x()))
-        / denom;
+    let t = ((p1.x() - p3.x()) * (p3.y() - p4.y()) - (p1.y() - p3.y()) * (p3.x() - p4.x())) / denom;
     Some(Point::new(
         p1.x() + t * (p2.x() - p1.x()),
         p1.y() + t * (p2.y() - p1.y()),

@@ -262,8 +262,7 @@ impl ReedsShepp {
 
             // Cumulative arc-length boundaries of each segment + its
             // forward flag. Used to classify every sampled waypoint.
-            let mut segment_bounds: Vec<(f64, bool)> =
-                Vec::with_capacity(segments.len());
+            let mut segment_bounds: Vec<(f64, bool)> = Vec::with_capacity(segments.len());
             let mut cumulative = 0.0;
             for segment in &segments {
                 cumulative += segment.length * radius;

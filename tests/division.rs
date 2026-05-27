@@ -66,11 +66,7 @@ fn rejects_empty_machine_list() {
 #[test]
 fn stripe_1_by_count_preserves_total_and_assigns_fairly() {
     let field = rect_field(10.0);
-    let plan = DivisionPlan::uniform(
-        2,
-        DivisionPattern::Stripe { stride: 1 },
-        Balance::ByCount,
-    );
+    let plan = DivisionPlan::uniform(2, DivisionPattern::Stripe { stride: 1 }, Balance::ByCount);
     let result = Divy::plan(&field.get_parts()[0], &plan).expect("plan");
 
     assert_eq!(result.swaths_per_machine.len(), 2);
@@ -92,11 +88,7 @@ fn stripe_stride_2_interleaves_in_pairs() {
     let mut field = Field::new(polygon, Geo::new(51.0, 5.0, 0.0)).expect("field");
     field.gen_field(10.0, 90.0, 0).expect("generated");
 
-    let plan = DivisionPlan::uniform(
-        2,
-        DivisionPattern::Stripe { stride: 2 },
-        Balance::ByCount,
-    );
+    let plan = DivisionPlan::uniform(2, DivisionPattern::Stripe { stride: 2 }, Balance::ByCount);
     let result = Divy::plan(&field.get_parts()[0], &plan).expect("plan");
     let (m0, m1) = (&result.swaths_per_machine[0], &result.swaths_per_machine[1]);
 
@@ -108,15 +100,20 @@ fn stripe_stride_2_interleaves_in_pairs() {
     let x_center = |s: &maptrax::Swath| (s.head().x() + s.tail().x()) * 0.5;
     let d0 = (x_center(&m0[0]) - x_center(&m0[1])).abs();
     let d1 = (x_center(&m1[0]) - x_center(&m1[1])).abs();
-    assert!(d0 < 11.0, "m0 first pair should be adjacent rows (gap {d0})");
-    assert!(d1 < 11.0, "m1 first pair should be adjacent rows (gap {d1})");
+    assert!(
+        d0 < 11.0,
+        "m0 first pair should be adjacent rows (gap {d0})"
+    );
+    assert!(
+        d1 < 11.0,
+        "m1 first pair should be adjacent rows (gap {d1})"
+    );
 }
 
 #[test]
 fn block_by_count_clusters_spatially() {
     let field = rect_field(10.0);
-    let plan =
-        DivisionPlan::uniform(2, DivisionPattern::Block, Balance::ByCount);
+    let plan = DivisionPlan::uniform(2, DivisionPattern::Block, Balance::ByCount);
     let result = Divy::plan(&field.get_parts()[0], &plan).expect("plan");
 
     let left = &result.swaths_per_machine[0];

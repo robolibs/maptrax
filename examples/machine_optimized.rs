@@ -55,8 +55,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let candidates: Vec<(&'static str, DivisionPattern)> = vec![
         ("Block", DivisionPattern::Block),
         ("Stripe{1}", DivisionPattern::Stripe { stride: 1 }),
-        ("BandedStripe{2}", DivisionPattern::BandedStripe { bands: 2 }),
-        ("BandedStripe{3}", DivisionPattern::BandedStripe { bands: 3 }),
+        (
+            "BandedStripe{2}",
+            DivisionPattern::BandedStripe { bands: 2 },
+        ),
+        (
+            "BandedStripe{3}",
+            DivisionPattern::BandedStripe { bands: 3 },
+        ),
     ];
 
     let turn = TurnPlannerConfig {
@@ -98,7 +104,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let work_lengths: Vec<f64> = planned
             .machines
             .iter()
-            .map(|m| m.assigned_swaths.iter().map(|s| segment_length(s.line)).sum())
+            .map(|m| {
+                m.assigned_swaths
+                    .iter()
+                    .map(|s| segment_length(s.line))
+                    .sum()
+            })
             .collect();
 
         scored.push(Scored {
@@ -253,7 +264,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let color = rerun_viz::machine_color(machine.machine_index);
             rerun_viz::log_swaths_tinted(
                 &rec,
-                &format!("enu/candidates/{slug}/swaths/machine_{}", machine.machine_index),
+                &format!(
+                    "enu/candidates/{slug}/swaths/machine_{}",
+                    machine.machine_index
+                ),
                 &machine.assigned_swaths,
                 color,
             )?;

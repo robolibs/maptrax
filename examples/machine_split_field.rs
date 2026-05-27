@@ -68,9 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     let mut planner = Maptrax::new();
-    planner
-        .set_field(border.clone(), datum)
-        .expect("field");
+    planner.set_field(border.clone(), datum).expect("field");
 
     planner.plan_field(&FieldGenerationOptions {
         swath_width: SWATH_WIDTH,

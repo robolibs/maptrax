@@ -47,7 +47,10 @@ fn python_module_exposes_maptrax_planning_surface() {
             .get_item("boundary")
             .expect("boundary")
             .expect("boundary value");
-        let swaths = part.get_item("swaths").expect("swaths").expect("swaths value");
+        let swaths = part
+            .get_item("swaths")
+            .expect("swaths")
+            .expect("swaths value");
         assert!(boundary.is_instance_of::<PyDict>());
         assert!(swaths.len().expect("swaths len") > 0);
 
@@ -92,7 +95,11 @@ fn python_module_exposes_maptrax_planning_surface() {
         let rs = planner
             .call_method1(
                 "plan_reeds_shepp",
-                ((0.0_f64, 0.0_f64, 0.0_f64), (0.0_f64, 18.0_f64, std::f64::consts::PI), 4.0_f64),
+                (
+                    (0.0_f64, 0.0_f64, 0.0_f64),
+                    (0.0_f64, 18.0_f64, std::f64::consts::PI),
+                    4.0_f64,
+                ),
             )
             .expect("reeds_shepp")
             .downcast_into::<PyDict>()
@@ -108,7 +115,11 @@ fn python_module_exposes_maptrax_planning_surface() {
         let dubins_paths = planner
             .call_method1(
                 "plan_all_dubins",
-                ((0.0_f64, 0.0_f64, 0.0_f64), (10.0_f64, 0.0_f64, 0.0_f64), 2.0_f64),
+                (
+                    (0.0_f64, 0.0_f64, 0.0_f64),
+                    (10.0_f64, 0.0_f64, 0.0_f64),
+                    2.0_f64,
+                ),
             )
             .expect("plan_all_dubins")
             .downcast_into::<pyo3::types::PyList>()
@@ -116,7 +127,11 @@ fn python_module_exposes_maptrax_planning_surface() {
         let reeds_paths = planner
             .call_method1(
                 "plan_all_reeds_shepp",
-                ((0.0_f64, 0.0_f64, 0.0_f64), (0.0_f64, 18.0_f64, std::f64::consts::PI), 4.0_f64),
+                (
+                    (0.0_f64, 0.0_f64, 0.0_f64),
+                    (0.0_f64, 18.0_f64, std::f64::consts::PI),
+                    4.0_f64,
+                ),
             )
             .expect("plan_all_reeds_shepp")
             .downcast_into::<pyo3::types::PyList>()

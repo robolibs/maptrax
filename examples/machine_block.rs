@@ -12,8 +12,8 @@ mod example_scenes;
 mod rerun_viz;
 
 use maptrax::{
-    Balance, DivisionPattern, DivisionPlan, Field, MachinePlanningOptions, Maptrax,
-    RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel, segment_length,
+    Balance, DivisionPattern, DivisionPlan, Field, MachinePlanningOptions, Maptrax, RoutingOptions,
+    RoutingStrategy, TurnPlannerConfig, TurnPlannerModel, segment_length,
 };
 use rerun::Color;
 

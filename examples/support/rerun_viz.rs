@@ -78,11 +78,7 @@ pub fn log_polylines_geo(
     let strips: Vec<Vec<[f64; 2]>> = polylines
         .iter()
         .filter(|arc| arc.len() >= 2)
-        .map(|arc| {
-            arc.iter()
-                .map(|point| point_geo(*point, datum))
-                .collect()
-        })
+        .map(|arc| arc.iter().map(|point| point_geo(*point, datum)).collect())
         .collect();
     if strips.is_empty() {
         return Ok(());
@@ -91,7 +87,10 @@ pub fn log_polylines_geo(
         .iter()
         .map(|_| Color::from_rgb(color.0, color.1, color.2))
         .collect();
-    rec.log(path, &GeoLineStrings::from_lat_lon(strips).with_colors(colors))?;
+    rec.log(
+        path,
+        &GeoLineStrings::from_lat_lon(strips).with_colors(colors),
+    )?;
     Ok(())
 }
 

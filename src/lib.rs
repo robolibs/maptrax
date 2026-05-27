@@ -1,7 +1,7 @@
 pub mod core;
 pub mod division;
-pub mod ffi;
 pub mod facade;
+pub mod ffi;
 pub mod field;
 pub mod net;
 #[cfg(feature = "python")]

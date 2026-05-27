@@ -72,9 +72,7 @@ fn parse_balance(name: &str) -> PyResult<Balance> {
     match name {
         "count" | "by_count" | "by-count" => Ok(Balance::ByCount),
         "length" | "by_length" | "by-length" => Ok(Balance::ByLength),
-        other => Err(PyValueError::new_err(format!(
-            "unknown balance: {other}"
-        ))),
+        other => Err(PyValueError::new_err(format!("unknown balance: {other}"))),
     }
 }
 
@@ -104,11 +102,12 @@ fn build_machine_profiles(
 
 fn parse_decomposition_mode(name: &str) -> PyResult<DecompositionMode> {
     // Accept "auto_split:520" or "auto_split:520.0" to specify max_side.
-    if let Some(rest) = name.strip_prefix("auto_split:").or_else(|| name.strip_prefix("auto-split:")) {
+    if let Some(rest) = name
+        .strip_prefix("auto_split:")
+        .or_else(|| name.strip_prefix("auto-split:"))
+    {
         let max_side: f64 = rest.parse().map_err(|_| {
-            PyValueError::new_err(format!(
-                "auto_split needs a numeric max_side, got: {rest}"
-            ))
+            PyValueError::new_err(format!("auto_split needs a numeric max_side, got: {rest}"))
         })?;
         return Ok(DecompositionMode::AutoSplit { max_side });
     }
@@ -158,6 +157,7 @@ fn swath_to_dict<'py>(py: Python<'py>, swath: &crate::Swath) -> PyResult<Bound<'
         .map(|point| (point.x(), point.y()))
         .collect::<Vec<_>>();
     dict.set_item("points", points)?;
+    dict.set_item("point_reverse", swath.point_reverse.clone())?;
     Ok(dict)
 }
 
@@ -425,7 +425,12 @@ impl PyMaptrax {
     }
 
     fn get_part<'py>(&self, py: Python<'py>, part_index: usize) -> PyResult<Bound<'py, PyDict>> {
-        let part = self.inner.field().map_err(py_err)?.part(part_index).map_err(py_err)?;
+        let part = self
+            .inner
+            .field()
+            .map_err(py_err)?
+            .part(part_index)
+            .map_err(py_err)?;
         part_snapshot_to_dict(py, part_index, part)
     }
 
@@ -477,9 +482,7 @@ impl PyMaptrax {
         decomposition: &str,
     ) -> PyResult<usize> {
         let mode = parse_decomposition_mode(decomposition)?;
-        self.inner
-            .decompose_field(mode)
-            .map_err(py_err)?;
+        self.inner.decompose_field(mode).map_err(py_err)?;
         self.inner
             .generate_field(swath_width, angle_degrees, headland_count)
             .map_err(py_err)?;
@@ -535,7 +538,12 @@ impl PyMaptrax {
                 },
             )
             .map_err(py_err)?;
-        part_to_dict(py, planned.part_index, &planned.ordered_swaths, &planned.tour)
+        part_to_dict(
+            py,
+            planned.part_index,
+            &planned.ordered_swaths,
+            &planned.tour,
+        )
     }
 
     #[pyo3(signature = (
@@ -798,7 +806,12 @@ impl PyMaptrax {
         );
         let list = PyList::empty(py);
         for path in &paths {
-            list.append(pose_path_to_dict(py, &path.name, path.total_length, &path.waypoints)?)?;
+            list.append(pose_path_to_dict(
+                py,
+                &path.name,
+                path.total_length,
+                &path.waypoints,
+            )?)?;
         }
         Ok(list)
     }
@@ -837,7 +850,12 @@ impl PyMaptrax {
         );
         let list = PyList::empty(py);
         for path in &paths {
-            list.append(pose_path_to_dict(py, &path.name, path.total_length, &path.waypoints)?)?;
+            list.append(pose_path_to_dict(
+                py,
+                &path.name,
+                path.total_length,
+                &path.waypoints,
+            )?)?;
         }
         Ok(list)
     }
