@@ -1,6 +1,6 @@
 [package]
 name = "maptrax"
-version = "0.0.2"
+version = "0.1.0"
 edition = "2024"
 description = "Rust agricultural field planning library translated from farmtrax"
 license = "MIT"
