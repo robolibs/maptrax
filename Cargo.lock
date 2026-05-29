@@ -669,12 +669,13 @@ dependencies = [
 
 [[package]]
 name = "concord"
-version = "0.0.1"
-source = "git+https://codeberg.org/robolibs/concord.git#895e4316c848650e6793c6fc67dfec4b7b954320"
+version = "0.1.0"
+source = "git+https://codeberg.org/robolibs/concord.git?tag=0.1.0#e1d4fabb58eb0ea963ebd4d4c9d7406a42c4e0b1"
 dependencies = [
  "datapod",
  "graphix",
  "kiddo",
+ "nalgebra",
  "rayon",
  "thiserror 2.0.18",
  "tokio",
@@ -902,8 +903,22 @@ dependencies = [
 
 [[package]]
 name = "datapod"
+version = "0.2.0"
+source = "git+https://codeberg.org/robolibs/datapod.git?tag=0.2.0#bf7839e417050b1fab33167c418595bf86313894"
+dependencies = [
+ "bytemuck",
+ "datapod-macros",
+]
+
+[[package]]
+name = "datapod-macros"
 version = "0.0.1"
-source = "git+https://codeberg.org/robolibs/datapod.git#b0da2bbaa372bdfe4a50f5150c7f082ae90e008a"
+source = "git+https://codeberg.org/robolibs/datapod.git?tag=0.2.0#bf7839e417050b1fab33167c418595bf86313894"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "digest"
@@ -1297,9 +1312,9 @@ dependencies = [
 
 [[package]]
 name = "geo-types"
-version = "0.7.18"
+version = "0.7.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24f8647af4005fa11da47cd56252c6ef030be8fa97bdbf355e7dfb6348f0a82c"
+checksum = "94776032c45f950d30a13af6113c2ad5625316c9abfbccee4dd5a6695f8fe0f5"
 dependencies = [
  "approx",
  "num-traits",
@@ -1364,6 +1379,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 
 [[package]]
+name = "glam"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fb167719045debebe9f532320accc7b5c993c5a3b813f5696a11d5ca7bdc57b"
+
+[[package]]
 name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1371,11 +1392,13 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "graphix"
-version = "0.0.1"
-source = "git+https://codeberg.org/robolibs/graphix.git#19d74a983dfa9fe75d91fb850d2a822ca531a7e7"
+version = "0.1.0"
+source = "git+https://codeberg.org/robolibs/graphix.git?tag=0.1.0#4ec1dd507ec3fb87fce6aab55aea788ebf15b837"
 dependencies = [
  "datapod",
+ "glam",
  "kiddo",
+ "nalgebra",
  "rayon",
  "tokio",
 ]
@@ -2107,6 +2130,7 @@ name = "maptrax"
 version = "0.0.1"
 dependencies = [
  "concord",
+ "datapod",
  "geo",
  "graphix",
  "pyo3",
@@ -2207,6 +2231,33 @@ name = "mpeg4-audio-const"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96a1fe2275b68991faded2c80aa4a33dba398b77d276038b8f50701a22e55918"
+
+[[package]]
+name = "nalgebra"
+version = "0.33.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d43ddcacf343185dfd6de2ee786d9e8b1c2301622afab66b6c73baf9882abfd"
+dependencies = [
+ "approx",
+ "matrixmultiply",
+ "nalgebra-macros",
+ "num-complex",
+ "num-rational",
+ "num-traits",
+ "simba",
+ "typenum",
+]
+
+[[package]]
+name = "nalgebra-macros"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "254a5372af8fc138e36684761d3c0cdb758a4410e938babcff1c860ce14ddbfc"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "natord"
@@ -3842,6 +3893,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "safe_arch"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4026,6 +4086,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "simba"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c99284beb21666094ba2b75bbceda012e610f5479dfcc2d6e2426f53197ffd95"
+dependencies = [
+ "approx",
+ "num-complex",
+ "num-traits",
+ "paste",
+ "wide",
 ]
 
 [[package]]
@@ -4872,6 +4945,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22cfaf3c063993ff62e73cb4311efde4db1efb31ab78a3e5c457939ad5cc0bed"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "wide"
+version = "0.7.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce5da8ecb62bcd8ec8b7ea19f69a51275e91299be594ea5cc6ef7819e16cd03"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
 ]
 
 [[package]]

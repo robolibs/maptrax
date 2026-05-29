@@ -894,13 +894,7 @@ impl PyMaptrax {
     }
 }
 
-pub fn register_python_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
+pub(super) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyMaptrax>()?;
-    module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
-}
-
-#[pymodule]
-fn maptrax(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    register_python_module(module)
 }

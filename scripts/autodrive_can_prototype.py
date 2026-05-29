@@ -104,7 +104,7 @@ BUS_SOURCE_DISPLAY = 40
 SOURCE_AUTODRIVE = 29  # proposal says "29 ?" for ADJOB/ADWPI source
 J1939_PRIORITY = 6
 
-PGN_VP1 = 0xFFEF
+PGN_VP1 = 0xFEF3
 PGN_VDS = 0xFEE8
 PGN_DSSTAT = 0xFFCA
 PGN_DSAP = 0xFFCB
@@ -400,12 +400,13 @@ def decode_dsstat(data: bytes, status: MachineStatus) -> None:
         return
     b1 = data[0]
     b2 = data[1]
-    status.gps_ppp_available = bool(b1 & 0x80)      # Byte1 bit8
-    status.autosteer_engaged = bool(b1 & 0x20)      # Byte1 bit6
-    status.header_down = bool(b1 & 0x08)            # Byte1 bit4
-    status.current_direction_reverse = bool(b1 & 0x02)  # Byte1 bit2
-    status.autodrive_allowed = bool(b2 & 0x01)      # Byte2 bit1
-    status.reject_reason = (b2 >> 1) & 0x7F
+    # Byte1: J1939 2-bit status fields (00=off, 01=on, 10=error, 11=N/A).
+    status.gps_ppp_available = (b1 & 0xC0) == 0x40          # bits 8-7
+    status.autosteer_engaged = (b1 & 0x30) == 0x10          # bits 6-5
+    status.header_down = (b1 & 0x0C) == 0x04                # bits 4-3
+    status.current_direction_reverse = (b1 & 0x03) == 0x01  # bits 2-1, verify with vendor
+    status.autodrive_allowed = (b2 & 0x03) == 0x01          # Byte2 bits 2-1
+    status.reject_reason = (b2 >> 2) & 0x3F                 # Byte2 bits 8-3
     status.last_rx_s = time.monotonic()
 
 
@@ -432,7 +433,9 @@ def encode_adjob(system_active: bool, run_command: bool, current_index: int, tot
     """
     b = bytearray(8)
     b[0] = 0
-    b[1] = ((error_code & 0x0F) << 4) | (0x08 if run_command else 0) | (0x01 if system_active else 0)
+    # Byte2: error code in bits 8-5, RunCommand at bits 4-3, SystemActive at bits 2-1.
+    # 2-bit fields use J1939 "active"=01 — bit 3 for RunCommand, bit 1 for SystemActive.
+    b[1] = ((error_code & 0x0F) << 4) | (0x04 if run_command else 0) | (0x01 if system_active else 0)
     struct.pack_into("<H", b, 2, clamp_u16(current_index))
     struct.pack_into("<H", b, 4, clamp_u16(total_points))
     struct.pack_into("<H", b, 6, clamp_u16(JOB_ID))
