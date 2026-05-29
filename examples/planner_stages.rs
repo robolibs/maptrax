@@ -1,18 +1,17 @@
-use concord::Geo;
-use geo::Point;
 use maptrax::{
-    DecompositionMode, FieldGenerationMode, FieldGenerationOptions, Maptrax, PlannerOptions,
-    RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel, polygon_from_points,
+    DecompositionMode, FieldGenerationMode, FieldGenerationOptions, Geo, Maptrax, PlannerOptions,
+    RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel, point_xy,
+    polygon_from_points,
 };
 
 fn main() {
     let polygon = polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(120.0, 0.0),
-        Point::new(120.0, 30.0),
-        Point::new(70.0, 30.0),
-        Point::new(70.0, 90.0),
-        Point::new(0.0, 90.0),
+        point_xy(0.0, 0.0),
+        point_xy(120.0, 0.0),
+        point_xy(120.0, 30.0),
+        point_xy(70.0, 30.0),
+        point_xy(70.0, 90.0),
+        point_xy(0.0, 90.0),
     ]);
 
     let mut planner = Maptrax::new();

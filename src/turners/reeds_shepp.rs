@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use crate::core::points_equal;
+use crate::core::{Point2Ext, points_equal};
 
 use super::Pose2D;
 

@@ -15,26 +15,25 @@ mod rerun_viz;
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write};
 
-use concord::Geo;
-use geo::Point;
 use maptrax::{
-    Balance, DivisionPattern, DivisionPlan, MachinePlanningOptions, Maptrax, RoutingOptions,
-    RoutingStrategy, TurnPlannerConfig, TurnPlannerModel, polygon_from_points, tour_polyline,
+    Balance, DivisionPattern, DivisionPlan, Geo, MachinePlanningOptions, Maptrax, Point, Point2Ext,
+    RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel, point_xy,
+    polygon_from_points, tour_polyline,
 };
 use rerun::Color;
 
 /// Field boundary supplied by the caller.
-fn field_points() -> Vec<Point<f64>> {
+fn field_points() -> Vec<Point> {
     vec![
-        Point::new(0.0, 0.0),
-        Point::new(-8.795, -3.606),
-        Point::new(-10.674, -10.385),
-        Point::new(-5.401, -20.865),
-        Point::new(7.202, -27.906),
-        Point::new(50.837, -39.694),
-        Point::new(160.405, -46.377),
-        Point::new(161.651, 5.508),
-        Point::new(91.502, 16.831),
+        point_xy(0.0, 0.0),
+        point_xy(-8.795, -3.606),
+        point_xy(-10.674, -10.385),
+        point_xy(-5.401, -20.865),
+        point_xy(7.202, -27.906),
+        point_xy(50.837, -39.694),
+        point_xy(160.405, -46.377),
+        point_xy(161.651, 5.508),
+        point_xy(91.502, 16.831),
     ]
 }
 
@@ -253,11 +252,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// is reversing at that point.
 fn split_forward_reverse_by_segment(
     tour: &[maptrax::Swath],
-) -> (Vec<Vec<Point<f64>>>, Vec<Vec<Point<f64>>>) {
+) -> (Vec<Vec<Point>>, Vec<Vec<Point>>) {
     use maptrax::SwathType;
 
-    let mut forward_runs: Vec<Vec<Point<f64>>> = Vec::new();
-    let mut reverse_runs: Vec<Vec<Point<f64>>> = Vec::new();
+    let mut forward_runs: Vec<Vec<Point>> = Vec::new();
+    let mut reverse_runs: Vec<Vec<Point>> = Vec::new();
 
     for segment in tour {
         if segment.points.len() < 2 {
@@ -284,7 +283,7 @@ fn split_forward_reverse_by_segment(
             let prev_reverse = *rev.get(i - 1).unwrap_or(&false);
             if current_reverse != prev_reverse {
                 // Direction change between pts[i-1] and pts[i].
-                let run: Vec<Point<f64>> = pts[run_start..i].to_vec();
+                let run: Vec<Point> = pts[run_start..i].to_vec();
                 if run.len() >= 2 {
                     if prev_reverse {
                         reverse_runs.push(run);
@@ -296,7 +295,7 @@ fn split_forward_reverse_by_segment(
             }
             i += 1;
         }
-        let tail: Vec<Point<f64>> = pts[run_start..].to_vec();
+        let tail: Vec<Point> = pts[run_start..].to_vec();
         if tail.len() >= 2 {
             let last_rev = *rev.last().unwrap_or(&false);
             if last_rev {

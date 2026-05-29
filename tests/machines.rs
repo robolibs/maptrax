@@ -1,5 +1,5 @@
 use concord::{Geo, Wgs, to_enu};
-use geo::Point;
+use maptrax::{Point, Point2Ext, point_xy};
 use maptrax::{
     Balance, DivisionPattern, DivisionPlan, MachinePlanningOptions, Maptrax, RoutingOptions,
     RoutingStrategy, SwathType, TurnPlannerConfig, polygon_from_points,
@@ -13,16 +13,16 @@ fn stripe_1_by_count(machines: usize) -> DivisionPlan {
     )
 }
 
-fn rectangular_polygon() -> geo::Polygon<f64> {
+fn rectangular_polygon() -> maptrax::Polygon {
     polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(100.0, 0.0),
-        Point::new(100.0, 50.0),
-        Point::new(0.0, 50.0),
+        point_xy(0.0, 0.0),
+        point_xy(100.0, 0.0),
+        point_xy(100.0, 50.0),
+        point_xy(0.0, 50.0),
     ])
 }
 
-fn upstream_fixture_polygon() -> geo::Polygon<f64> {
+fn upstream_fixture_polygon() -> maptrax::Polygon {
     let datum = Geo::new(51.98954034749562, 5.6584737410504715, 53.801823);
     polygon_from_points(
         [
@@ -38,7 +38,7 @@ fn upstream_fixture_polygon() -> geo::Polygon<f64> {
         .into_iter()
         .map(|wgs| {
             let enu = to_enu(datum, wgs);
-            Point::new(enu.east(), enu.north())
+            point_xy(enu.east(), enu.north())
         })
         .collect(),
     )

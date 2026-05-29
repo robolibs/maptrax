@@ -2,9 +2,10 @@
 
 use std::error::Error;
 
-use concord::{Geo, Wgs, to_wgs_from_enu};
-use geo::{LineString, Point, Polygon};
-use maptrax::{Pose2D, Swath, SwathType};
+use concord::{Wgs, to_wgs_from_enu};
+use maptrax::{
+    Geo, Point, Point2Ext, Polygon, Pose2D, Swath, SwathType, point_xy, polygon_exterior_points,
+};
 use rerun::{Color, GeoLineStrings, LineStrips2D, RecordingStream, RecordingStreamBuilder};
 
 pub fn connect(app_id: &str) -> Result<RecordingStream, Box<dyn Error>> {
@@ -17,10 +18,10 @@ pub fn connect(app_id: &str) -> Result<RecordingStream, Box<dyn Error>> {
 pub fn log_polygon(
     rec: &RecordingStream,
     path: &str,
-    polygon: &Polygon<f64>,
+    polygon: &Polygon,
     color: Color,
 ) -> Result<(), Box<dyn Error>> {
-    let strip = close_points(line_string_points(polygon.exterior()));
+    let strip = close_points(points2(&polygon_exterior_points(polygon)));
     rec.log(path, &LineStrips2D::new([strip]).with_colors([color]))?;
     Ok(())
 }
@@ -47,7 +48,7 @@ pub fn log_swaths_tinted(
 pub fn log_polylines(
     rec: &RecordingStream,
     path: &str,
-    polylines: &[Vec<Point<f64>>],
+    polylines: &[Vec<Point>],
     color: (u8, u8, u8),
 ) -> Result<(), Box<dyn Error>> {
     let strips: Vec<Vec<[f32; 2]>> = polylines
@@ -71,7 +72,7 @@ pub fn log_polylines(
 pub fn log_polylines_geo(
     rec: &RecordingStream,
     path: &str,
-    polylines: &[Vec<Point<f64>>],
+    polylines: &[Vec<Point>],
     datum: Geo,
     color: (u8, u8, u8),
 ) -> Result<(), Box<dyn Error>> {
@@ -126,11 +127,11 @@ fn log_swaths_with_palette(
 pub fn log_polygon_geo(
     rec: &RecordingStream,
     path: &str,
-    polygon: &Polygon<f64>,
+    polygon: &Polygon,
     datum: Geo,
     color: Color,
 ) -> Result<(), Box<dyn Error>> {
-    let strip = close_geo_points(line_string_geo_points(polygon.exterior(), datum));
+    let strip = close_geo_points(points_geo(&polygon_exterior_points(polygon), datum));
     rec.log(
         path,
         &GeoLineStrings::from_lat_lon([strip]).with_colors([color]),
@@ -188,12 +189,12 @@ pub fn log_swaths_geo_tinted(
     Ok(())
 }
 
-fn line_string_points(line: &LineString<f64>) -> Vec<[f32; 2]> {
-    line.points().map(point2).collect()
+fn points2(points: &[Point]) -> Vec<[f32; 2]> {
+    points.iter().copied().map(point2).collect()
 }
 
-fn line_string_geo_points(line: &LineString<f64>, datum: Geo) -> Vec<[f64; 2]> {
-    line.points().map(|point| point_geo(point, datum)).collect()
+fn points_geo(points: &[Point], datum: Geo) -> Vec<[f64; 2]> {
+    points.iter().map(|point| point_geo(*point, datum)).collect()
 }
 
 fn close_points(mut points: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
@@ -214,7 +215,7 @@ fn close_geo_points(mut points: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
     points
 }
 
-fn point2(point: Point<f64>) -> [f32; 2] {
+fn point2(point: Point) -> [f32; 2] {
     [point.x() as f32, point.y() as f32]
 }
 
@@ -226,15 +227,15 @@ pub fn log_pose(
     axis_length: f64,
 ) -> Result<(), Box<dyn Error>> {
     let head = pose.point;
-    let tip = Point::new(
+    let tip = point_xy(
         head.x() + axis_length * pose.yaw.cos(),
         head.y() + axis_length * pose.yaw.sin(),
     );
-    let left = Point::new(
+    let left = point_xy(
         tip.x() - axis_length * 0.25 * (pose.yaw - 2.6).cos(),
         tip.y() - axis_length * 0.25 * (pose.yaw - 2.6).sin(),
     );
-    let right = Point::new(
+    let right = point_xy(
         tip.x() - axis_length * 0.25 * (pose.yaw + 2.6).cos(),
         tip.y() - axis_length * 0.25 * (pose.yaw + 2.6).sin(),
     );
@@ -259,15 +260,15 @@ pub fn log_pose_geo(
     axis_length: f64,
 ) -> Result<(), Box<dyn Error>> {
     let head = pose.point;
-    let tip = Point::new(
+    let tip = point_xy(
         head.x() + axis_length * pose.yaw.cos(),
         head.y() + axis_length * pose.yaw.sin(),
     );
-    let left = Point::new(
+    let left = point_xy(
         tip.x() - axis_length * 0.25 * (pose.yaw - 2.6).cos(),
         tip.y() - axis_length * 0.25 * (pose.yaw - 2.6).sin(),
     );
-    let right = Point::new(
+    let right = point_xy(
         tip.x() - axis_length * 0.25 * (pose.yaw + 2.6).cos(),
         tip.y() - axis_length * 0.25 * (pose.yaw + 2.6).sin(),
     );
@@ -319,7 +320,7 @@ pub fn log_pose_path_geo(
     Ok(())
 }
 
-fn point_geo(point: Point<f64>, datum: Geo) -> [f64; 2] {
+fn point_geo(point: Point, datum: Geo) -> [f64; 2] {
     let wgs: Wgs = to_wgs_from_enu(concord::Enu::new(point.x(), point.y(), 0.0, datum));
     [wgs.latitude, wgs.longitude]
 }

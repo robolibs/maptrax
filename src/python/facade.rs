@@ -1,12 +1,12 @@
-use geo::Point;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 
 use crate::{
     Balance, ConnectorMode, DecompositionMode, DivisionPattern, DivisionPlan, Geo, HeadlandMode,
-    MachinePlanningOptions, MachineProfile, Maptrax, OptimizeObjective, Pose2D, RoutingOptions,
-    RoutingStrategy, TurnPlannerConfig, TurnPlannerModel, polygon_from_points,
+    MachinePlanningOptions, MachineProfile, Maptrax, OptimizeObjective, Point2Ext, Pose2D,
+    RoutingOptions, RoutingStrategy, TurnPlannerConfig, TurnPlannerModel, point_xy,
+    polygon_exterior_points, polygon_from_points,
 };
 
 fn py_err(err: crate::MaptraxError) -> PyErr {
@@ -137,11 +137,11 @@ fn parse_headland_mode(name: &str, dedicated_machine: usize) -> PyResult<Headlan
     }
 }
 
-fn polygon_from_xy(points: Vec<(f64, f64)>) -> crate::Result<geo::Polygon<f64>> {
+fn polygon_from_xy(points: Vec<(f64, f64)>) -> crate::Result<crate::Polygon> {
     Ok(polygon_from_points(
         points
             .into_iter()
-            .map(|(x, y)| Point::new(x, y))
+            .map(|(x, y)| point_xy(x, y))
             .collect::<Vec<_>>(),
     ))
 }
@@ -167,9 +167,8 @@ fn ring_to_dict<'py>(py: Python<'py>, ring: &crate::Ring) -> PyResult<Bound<'py,
     dict.set_item("finished", ring.finished)?;
     dict.set_item(
         "points",
-        ring.polygon
-            .exterior()
-            .points()
+        polygon_exterior_points(&ring.polygon)
+            .into_iter()
             .map(|point| (point.x(), point.y()))
             .collect::<Vec<_>>(),
     )?;
@@ -385,7 +384,7 @@ impl PyMaptrax {
         let polygon = polygon_from_points(
             border
                 .into_iter()
-                .map(|(x, y)| Point::new(x, y))
+                .map(|(x, y)| point_xy(x, y))
                 .collect::<Vec<_>>(),
         );
         self.inner

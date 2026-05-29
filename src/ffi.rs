@@ -2,11 +2,9 @@ use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char};
 use std::ptr;
 
-use geo::Point;
-
 use crate::{
-    ConnectorMode, Geo, Maptrax, Pose2D, RoutingOptions, RoutingStrategy, TurnPlannerConfig,
-    TurnPlannerModel, polygon_from_points,
+    ConnectorMode, Geo, Maptrax, Point, Point2Ext, Pose2D, RoutingOptions, RoutingStrategy,
+    TurnPlannerConfig, TurnPlannerModel, point_xy, polygon_exterior_points, polygon_from_points,
 };
 
 thread_local! {
@@ -242,7 +240,7 @@ fn coords_from_raw(ptr_coords: *const MaptraxCoord2, len: usize) -> crate::Resul
     let slice = unsafe { std::slice::from_raw_parts(ptr_coords, len) };
     Ok(slice
         .iter()
-        .map(|coord| Point::new(coord.x, coord.y))
+        .map(|coord| point_xy(coord.x, coord.y))
         .collect())
 }
 
@@ -320,10 +318,8 @@ fn flatten_rings(rings: &[crate::Ring]) -> FlatRingBuffer {
 
     for ring in rings {
         let offset = point_buffer.len();
-        let points = ring
-            .polygon
-            .exterior()
-            .points()
+        let points = polygon_exterior_points(&ring.polygon)
+            .into_iter()
             .map(|point| MaptraxCoord2 {
                 x: point.x(),
                 y: point.y(),

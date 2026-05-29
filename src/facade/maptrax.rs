@@ -1,7 +1,5 @@
-use concord::Geo;
-use geo::Polygon;
-
-use crate::core::{MaptraxError, Result};
+use crate::Geo;
+use crate::core::{MaptraxError, Point, Point2Ext, Polygon, Result};
 use crate::division::{DivisionPlan, Divy};
 use crate::field::{
     DecompositionMode, Field, Part, Swath, SwathAngleSearchOptions, SwathAngleSearchResult,
@@ -420,10 +418,10 @@ impl Maptrax {
 /// polyline of (x, y) points. Adjacent segments meet at shared endpoints, so
 /// we skip duplicate points at the joins. The returned Vec<Point> is the
 /// full drive path you can feed to a controller, plot, or export.
-pub fn tour_polyline(tour: &[Swath]) -> Vec<geo::Point<f64>> {
-    let mut out: Vec<geo::Point<f64>> = Vec::new();
+pub fn tour_polyline(tour: &[Swath]) -> Vec<Point> {
+    let mut out: Vec<Point> = Vec::new();
     for swath in tour {
-        let segment_points: Vec<geo::Point<f64>> = if swath.points.len() >= 2 {
+        let segment_points: Vec<Point> = if swath.points.len() >= 2 {
             swath.points.clone()
         } else {
             vec![swath.head(), swath.tail()]

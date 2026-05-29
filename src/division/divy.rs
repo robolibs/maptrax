@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 
-use geo::Point;
-
 use crate::core::{
-    MaptraxError, Result, point_distance, points_equal, polygon_open_vertices, segment_length,
+    MaptraxError, Point, Point2Ext, Polygon, Result, point_distance, point_xy, points_equal,
+    polygon_open_vertices, segment_length,
 };
 use crate::field::{Part, Ring, Swath, SwathType, canonical_swath_order, dominant_swath_tangent};
 
@@ -610,7 +609,7 @@ fn lateral_of(head: Point, tail: Point, normal: (f64, f64)) -> f64 {
 /// Zone index 0 corresponds to the lowest lateral range (left of the first
 /// boundary), zone `boundaries.len()` is the highest (right of the last).
 fn split_ring_into_zone_arcs(
-    polygon: &geo::Polygon,
+    polygon: &Polygon,
     boundaries: &[f64],
     normal: (f64, f64),
 ) -> Vec<Vec<HeadlandArc>> {
@@ -642,7 +641,7 @@ fn split_ring_into_zone_arcs(
                     if t > 1e-9 && t < 1.0 - 1e-9 {
                         let cx = a.x() + t * (b.x() - a.x());
                         let cy = a.y() + t * (b.y() - a.y());
-                        crossings.push((t, Point::new(cx, cy)));
+                        crossings.push((t, point_xy(cx, cy)));
                     }
                 }
             }

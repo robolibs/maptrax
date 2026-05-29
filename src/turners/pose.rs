@@ -1,4 +1,4 @@
-use geo::Point;
+use crate::core::{Point, point_xy};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pose2D {
@@ -9,7 +9,7 @@ pub struct Pose2D {
 impl Pose2D {
     pub fn new(x: f64, y: f64, yaw: f64) -> Self {
         Self {
-            point: Point::new(x, y),
+            point: point_xy(x, y),
             yaw,
         }
     }

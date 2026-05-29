@@ -1,13 +1,15 @@
 use std::collections::HashSet;
 
-use geo::Point;
 use graphix::vertex::algorithms::dijkstra;
 use graphix::vertex::{
     EdgeType, Graph, VertexId, add_edge_with_weight, add_vertex_with_property, num_edges,
     num_vertices,
 };
 
-use crate::core::{aabb_from_points, point_distance, segment_end, segment_length, segment_start};
+use crate::core::{
+    Point, Point2Ext, aabb_from_points, point_distance, segment_end, segment_length, segment_new,
+    segment_start,
+};
 use crate::field::{Swath, SwathType, canonical_swath_order, dominant_swath_tangent};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -352,7 +354,7 @@ fn build_connection_augmented_order(traversal: Vec<Swath>) -> Vec<Swath> {
         ordered.push(swath.clone());
         if let Some(next) = traversal.get(index + 1) {
             let connection = Swath {
-                line: geo::Line::new(swath.tail().0, next.head().0),
+                line: segment_new(swath.tail(), next.head()),
                 uuid: format!("connection_{}_{}", swath.uuid, next.uuid),
                 r#type: SwathType::Connection,
                 finished: false,

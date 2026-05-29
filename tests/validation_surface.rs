@@ -1,5 +1,5 @@
 use concord::{Geo, Wgs, to_enu};
-use geo::{Point, Polygon};
+use maptrax::{Point, Point2Ext, Polygon, point_xy};
 use maptrax::{
     Balance, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode,
     FieldGenerationOptions, MachinePlanningOptions, Maptrax, OptimizeObjective, PlannerOptions,
@@ -9,32 +9,32 @@ use maptrax::{
 
 fn rectangle_polygon() -> Polygon {
     polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(100.0, 0.0),
-        Point::new(100.0, 50.0),
-        Point::new(0.0, 50.0),
+        point_xy(0.0, 0.0),
+        point_xy(100.0, 0.0),
+        point_xy(100.0, 50.0),
+        point_xy(0.0, 50.0),
     ])
 }
 
 fn irregular_convex_polygon() -> Polygon {
     polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(120.0, 10.0),
-        Point::new(140.0, 60.0),
-        Point::new(90.0, 95.0),
-        Point::new(30.0, 85.0),
-        Point::new(-10.0, 40.0),
+        point_xy(0.0, 0.0),
+        point_xy(120.0, 10.0),
+        point_xy(140.0, 60.0),
+        point_xy(90.0, 95.0),
+        point_xy(30.0, 85.0),
+        point_xy(-10.0, 40.0),
     ])
 }
 
 fn concave_polygon() -> Polygon {
     polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(120.0, 0.0),
-        Point::new(120.0, 30.0),
-        Point::new(70.0, 30.0),
-        Point::new(70.0, 90.0),
-        Point::new(0.0, 90.0),
+        point_xy(0.0, 0.0),
+        point_xy(120.0, 0.0),
+        point_xy(120.0, 30.0),
+        point_xy(70.0, 30.0),
+        point_xy(70.0, 90.0),
+        point_xy(0.0, 90.0),
     ])
 }
 
@@ -53,7 +53,7 @@ fn upstream_polygon(datum: Geo) -> Polygon {
         .into_iter()
         .map(|wgs| {
             let enu = to_enu(datum, wgs);
-            Point::new(enu.east(), enu.north())
+            point_xy(enu.east(), enu.north())
         })
         .collect(),
     )
@@ -62,12 +62,12 @@ fn upstream_polygon(datum: Geo) -> Polygon {
 fn assert_swaths_are_geometrically_sane(swaths: &[Swath]) {
     assert!(!swaths.is_empty());
     for swath in swaths {
-        assert!(swath.bounding_box.min().x.is_finite());
-        assert!(swath.bounding_box.min().y.is_finite());
-        assert!(swath.bounding_box.max().x.is_finite());
-        assert!(swath.bounding_box.max().y.is_finite());
-        assert!(swath.bounding_box.min().x <= swath.bounding_box.max().x);
-        assert!(swath.bounding_box.min().y <= swath.bounding_box.max().y);
+        assert!(swath.bounding_box.min_point.x.is_finite());
+        assert!(swath.bounding_box.min_point.y.is_finite());
+        assert!(swath.bounding_box.max_point.x.is_finite());
+        assert!(swath.bounding_box.max_point.y.is_finite());
+        assert!(swath.bounding_box.min_point.x <= swath.bounding_box.max_point.x);
+        assert!(swath.bounding_box.min_point.y <= swath.bounding_box.max_point.y);
         assert!(!swath.points.is_empty());
         assert!(
             swath

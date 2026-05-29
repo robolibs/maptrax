@@ -18,12 +18,12 @@
 //! path = dub.plan((0,0,0), (10,5,1.57), step_size=0.2)
 //! ```
 
-use geo::Point;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
 use crate as mt;
+use crate::{Point2Ext, point_xy};
 
 use super::domain::{
     PyABLine, PyDivisionResult, PyDubinsPath, PyPart, PyReedsSheppPath, PyRing, PySharpTurnPath,
@@ -36,7 +36,7 @@ fn py_err(err: mt::MaptraxError) -> PyErr {
     PyRuntimeError::new_err(err.to_string())
 }
 
-fn polygon_from_xy(points: Vec<(f64, f64)>) -> PyResult<geo::Polygon<f64>> {
+fn polygon_from_xy(points: Vec<(f64, f64)>) -> PyResult<mt::Polygon> {
     if points.len() < 3 {
         return Err(PyValueError::new_err(
             "polygon requires at least 3 points",
@@ -45,7 +45,7 @@ fn polygon_from_xy(points: Vec<(f64, f64)>) -> PyResult<geo::Polygon<f64>> {
     Ok(mt::polygon_from_points(
         points
             .into_iter()
-            .map(|(x, y)| Point::new(x, y))
+            .map(|(x, y)| point_xy(x, y))
             .collect::<Vec<_>>(),
     ))
 }
@@ -251,7 +251,7 @@ impl PyNety {
             .as_ref()
             .map(Into::into)
             .unwrap_or_default();
-        let start = start.map(|(x, y)| Point::new(x, y));
+        let start = start.map(|(x, y)| point_xy(x, y));
         self.inner.field_traversal_with_options(start, opts);
         self.swaths()
     }
@@ -351,8 +351,8 @@ impl PyField {
     fn border(&self) -> Vec<(f64, f64)> {
         self.inner
             .border()
-            .exterior()
-            .points()
+            .vertices
+            .iter()
             .map(|p| (p.x(), p.y()))
             .collect()
     }

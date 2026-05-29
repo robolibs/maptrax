@@ -2,7 +2,7 @@
 mod rerun_viz;
 
 use concord::Geo;
-use maptrax::{Dubins, Pose2D, ReedsShepp};
+use maptrax::{Dubins, Point2Ext, Pose2D, ReedsShepp};
 use rerun::Color;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

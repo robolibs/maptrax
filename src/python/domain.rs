@@ -12,11 +12,11 @@
 //! - Poses are exposed as `(x, y, yaw)` 3-tuples; no `Pose2D` class.
 //! - Tagged-enum variants follow the `.kind` SCREAMING_SNAKE convention.
 
-use geo::Point;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
 use crate as mt;
+use crate::{Point, Point2Ext};
 
 use super::enums::{PyDubinsSegmentType, PyReedsSheppSegmentType, PySwathType};
 
@@ -28,8 +28,8 @@ fn pose(p: mt::Pose2D) -> (f64, f64, f64) {
     (p.point.x(), p.point.y(), p.yaw)
 }
 
-fn poly_points(poly: &geo::Polygon<f64>) -> Vec<(f64, f64)> {
-    poly.exterior().points().map(pt).collect()
+fn poly_points(poly: &mt::Polygon) -> Vec<(f64, f64)> {
+    mt::polygon_exterior_points(poly).into_iter().map(pt).collect()
 }
 
 // -----------------------------------------------------------------------------
@@ -172,7 +172,7 @@ impl PyRing {
             "Ring(uuid={}, finished={}, vertices={})",
             self.inner.uuid,
             self.inner.finished,
-            self.inner.polygon.exterior().points().count()
+            mt::polygon_exterior_points(&self.inner.polygon).len()
         )
     }
 }

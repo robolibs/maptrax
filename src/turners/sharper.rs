@@ -1,6 +1,4 @@
-use geo::Point;
-
-use crate::core::{angle_difference, normalize_angle, point_distance};
+use crate::core::{Point, Point2Ext, angle_difference, normalize_angle, point_distance, point_xy};
 
 use super::Pose2D;
 
@@ -72,14 +70,14 @@ impl Sharper {
 
     fn generate_three_point_turn(&self, start: Pose2D, end: Pose2D) -> SharpTurnPath {
         let forward = Pose2D::from_point(
-            Point::new(
+            point_xy(
                 start.point.x() + self.machine_length * start.yaw.cos(),
                 start.point.y() + self.machine_length * start.yaw.sin(),
             ),
             start.yaw,
         );
         let reverse = Pose2D::from_point(
-            Point::new(
+            point_xy(
                 start.point.x() - self.machine_length * end.yaw.cos(),
                 start.point.y() - self.machine_length * end.yaw.sin(),
             ),
@@ -107,7 +105,7 @@ impl Sharper {
             let current_angle = normalize_angle(start.yaw + turn_angle * t);
             let bulb_factor = (std::f64::consts::PI * t).sin() * bulb_radius;
             let perpendicular = current_angle + std::f64::consts::FRAC_PI_2;
-            let point = Point::new(
+            let point = point_xy(
                 start.point.x()
                     + self.radius * t * current_angle.cos()
                     + bulb_factor * perpendicular.cos(),
@@ -126,7 +124,7 @@ impl Sharper {
     fn generate_fishtail_turn(&self, start: Pose2D, end: Pose2D, turn_angle: f64) -> SharpTurnPath {
         let extend = self.machine_length * 1.2;
         let approach = Pose2D::from_point(
-            Point::new(
+            point_xy(
                 start.point.x() + 0.5 * self.machine_length * start.yaw.cos(),
                 start.point.y() + 0.5 * self.machine_length * start.yaw.sin(),
             ),
@@ -134,7 +132,7 @@ impl Sharper {
         );
         let tail_angle = normalize_angle(start.yaw - turn_angle * 0.4);
         let tail = Pose2D::from_point(
-            Point::new(
+            point_xy(
                 approach.point.x() + extend * tail_angle.cos(),
                 approach.point.y() + extend * tail_angle.sin(),
             ),
@@ -142,14 +140,14 @@ impl Sharper {
         );
         let transition_angle = normalize_angle(start.yaw + turn_angle * 0.7);
         let transition = Pose2D::from_point(
-            Point::new(
+            point_xy(
                 tail.point.x() + self.machine_length * transition_angle.cos(),
                 tail.point.y() + self.machine_length * transition_angle.sin(),
             ),
             transition_angle,
         );
         let final_approach = Pose2D::from_point(
-            Point::new(
+            point_xy(
                 end.point.x() - 0.5 * self.machine_length * end.yaw.cos(),
                 end.point.y() - 0.5 * self.machine_length * end.yaw.sin(),
             ),
