@@ -1,4 +1,4 @@
-use geo::Point;
+use maptrax::{Point, Point2Ext, point_xy};
 use maptrax::{ABLine, Nety, RoutingOptions, RoutingStrategy, Swath, SwathType, create_swath};
 
 fn test_swaths() -> Vec<Swath> {
@@ -6,8 +6,8 @@ fn test_swaths() -> Vec<Swath> {
         .map(|i| {
             let x = i as f64 * 10.0;
             let mut swath = create_swath(
-                Point::new(x, 0.0),
-                Point::new(x, 100.0),
+                point_xy(x, 0.0),
+                point_xy(x, 100.0),
                 SwathType::Swath,
                 format!("swath_{i}"),
             );
@@ -24,8 +24,8 @@ fn shuffled_parallel_swaths() -> Vec<Swath> {
         .enumerate()
         .map(|(i, x)| {
             let mut swath = create_swath(
-                Point::new(*x, 0.0),
-                Point::new(*x, 100.0),
+                point_xy(*x, 0.0),
+                point_xy(*x, 100.0),
                 SwathType::Swath,
                 format!("swath_{}", *x as i32),
             );
@@ -39,26 +39,26 @@ fn shuffled_parallel_swaths() -> Vec<Swath> {
 fn synthetic_quality_swaths() -> Vec<Swath> {
     vec![
         create_swath(
-            Point::new(0.0, 0.0),
-            Point::new(0.0, 40.0),
+            point_xy(0.0, 0.0),
+            point_xy(0.0, 40.0),
             SwathType::Swath,
             "a",
         ),
         create_swath(
-            Point::new(30.0, 40.0),
-            Point::new(30.0, 0.0),
+            point_xy(30.0, 40.0),
+            point_xy(30.0, 0.0),
             SwathType::Swath,
             "b",
         ),
         create_swath(
-            Point::new(60.0, 0.0),
-            Point::new(60.0, 40.0),
+            point_xy(60.0, 0.0),
+            point_xy(60.0, 40.0),
             SwathType::Swath,
             "c",
         ),
         create_swath(
-            Point::new(90.0, 40.0),
-            Point::new(90.0, 0.0),
+            point_xy(90.0, 40.0),
+            point_xy(90.0, 0.0),
             SwathType::Swath,
             "d",
         ),
@@ -95,12 +95,12 @@ fn deadhead_distance(nety: &Nety, start: Point) -> f64 {
 
 #[test]
 fn ab_line_creation_and_properties_work() {
-    let line = ABLine::new(Point::new(0.0, 0.0), Point::new(10.0, 0.0), "test_line", 1);
+    let line = ABLine::new(point_xy(0.0, 0.0), point_xy(10.0, 0.0), "test_line", 1);
     assert!((line.length() - 10.0).abs() < 1e-9);
 
     let swath = create_swath(
-        Point::new(0.0, 0.0),
-        Point::new(10.0, 0.0),
+        point_xy(0.0, 0.0),
+        point_xy(10.0, 0.0),
         SwathType::Swath,
         "test_line",
     );
@@ -153,7 +153,7 @@ fn field_traversal_preserves_all_working_swaths() {
 fn shortest_path_reorders_swaths_along_the_graph() {
     let swaths = test_swaths();
     let mut nety = Nety::new(&swaths);
-    nety.shortest_path(Some(Point::new(0.0, 0.0)), Some(Point::new(40.0, 100.0)));
+    nety.shortest_path(Some(point_xy(0.0, 0.0)), Some(point_xy(40.0, 100.0)));
 
     let ordered = nety.get_swaths();
     assert!(!ordered.is_empty());
@@ -176,10 +176,10 @@ fn snake_strategy_is_deterministic_on_parallel_swaths() {
     };
 
     let mut a = Nety::new(&swaths);
-    a.field_traversal_with_options(Some(Point::new(0.0, 0.0)), options);
+    a.field_traversal_with_options(Some(point_xy(0.0, 0.0)), options);
 
     let mut b = Nety::new(&swaths);
-    b.field_traversal_with_options(Some(Point::new(0.0, 0.0)), options);
+    b.field_traversal_with_options(Some(point_xy(0.0, 0.0)), options);
 
     assert_eq!(swath_order(&a), swath_order(&b));
     assert_eq!(
@@ -199,7 +199,7 @@ fn spiral_strategy_walks_outer_rows_inward() {
     let swaths = shuffled_parallel_swaths();
     let mut nety = Nety::new(&swaths);
     nety.field_traversal_with_options(
-        Some(Point::new(0.0, 0.0)),
+        Some(point_xy(0.0, 0.0)),
         RoutingOptions {
             strategy: RoutingStrategy::Spiral,
             local_improvement_passes: 0,
@@ -221,7 +221,7 @@ fn spiral_strategy_walks_outer_rows_inward() {
 #[test]
 fn local_improvement_does_not_worsen_deadhead_distance() {
     let swaths = synthetic_quality_swaths();
-    let start = Point::new(0.0, 0.0);
+    let start = point_xy(0.0, 0.0);
 
     let mut base = Nety::new(&swaths);
     base.field_traversal_with_options(

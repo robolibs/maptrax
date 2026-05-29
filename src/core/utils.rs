@@ -1,10 +1,8 @@
-use geo::{Point, Polygon};
-
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::{
-    point_distance, polygon_from_points, polygon_open_vertices, segment_distance_to_point,
-    segment_new,
+    Point, Point2Ext, Polygon, point_distance, polygon_from_points, polygon_open_vertices,
+    segment_distance_to_point, segment_new,
 };
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);

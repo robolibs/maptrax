@@ -20,25 +20,23 @@
 #[path = "support/rerun_viz.rs"]
 mod rerun_viz;
 
-use concord::Geo;
-use geo::{Point, Polygon};
 use maptrax::{
-    Balance, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode,
+    Balance, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode, Geo, Point,
     FieldGenerationOptions, Maptrax, RoutingOptions, RoutingStrategy, Swath, TurnPlannerConfig,
-    TurnPlannerModel, polygon_from_points, segment_length,
+    TurnPlannerModel, point_xy, polygon_from_points, segment_length,
 };
 use rerun::Color;
 
-fn big_irregular_field() -> Polygon {
+fn big_irregular_field() -> maptrax::Polygon {
     polygon_from_points(vec![
-        Point::new(-40.0, 90.0),
-        Point::new(180.0, 0.0),
-        Point::new(620.0, 30.0),
-        Point::new(890.0, 180.0),
-        Point::new(860.0, 420.0),
-        Point::new(520.0, 495.0),
-        Point::new(150.0, 450.0),
-        Point::new(-60.0, 310.0),
+        point_xy(-40.0, 90.0),
+        point_xy(180.0, 0.0),
+        point_xy(620.0, 30.0),
+        point_xy(890.0, 180.0),
+        point_xy(860.0, 420.0),
+        point_xy(520.0, 495.0),
+        point_xy(150.0, 450.0),
+        point_xy(-60.0, 310.0),
     ])
 }
 

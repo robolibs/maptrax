@@ -1,5 +1,5 @@
 use concord::Geo;
-use geo::{Point, Polygon};
+use maptrax::{Point, Point2Ext, Polygon, point_xy};
 use maptrax::{
     Balance, ConnectorMode, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode,
     FieldGenerationOptions, Maptrax, Nety, Part, PlannerOptions, RoutingOptions, RoutingStrategy,
@@ -9,43 +9,43 @@ use maptrax::{
 
 fn test_polygon() -> Polygon {
     polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(100.0, 0.0),
-        Point::new(100.0, 50.0),
-        Point::new(0.0, 50.0),
+        point_xy(0.0, 0.0),
+        point_xy(100.0, 0.0),
+        point_xy(100.0, 50.0),
+        point_xy(0.0, 50.0),
     ])
 }
 
 fn concave_polygon() -> Polygon {
     polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(120.0, 0.0),
-        Point::new(120.0, 30.0),
-        Point::new(70.0, 30.0),
-        Point::new(70.0, 90.0),
-        Point::new(0.0, 90.0),
+        point_xy(0.0, 0.0),
+        point_xy(120.0, 0.0),
+        point_xy(120.0, 30.0),
+        point_xy(70.0, 30.0),
+        point_xy(70.0, 90.0),
+        point_xy(0.0, 90.0),
     ])
 }
 
 fn upstream_fixture_polygon() -> Polygon {
     polygon_from_points(vec![
-        Point::new(85.7, -209.6),
-        Point::new(201.6, -152.9),
-        Point::new(109.3, 34.4),
-        Point::new(230.0, 97.4),
-        Point::new(121.5, 170.9),
-        Point::new(-249.8, -6.7),
-        Point::new(-173.5, -153.4),
+        point_xy(85.7, -209.6),
+        point_xy(201.6, -152.9),
+        point_xy(109.3, 34.4),
+        point_xy(230.0, 97.4),
+        point_xy(121.5, 170.9),
+        point_xy(-249.8, -6.7),
+        point_xy(-173.5, -153.4),
     ])
 }
 
 fn simple_part_with_headland() -> Part {
     let boundary_poly = test_polygon();
     let headland_poly = polygon_from_points(vec![
-        Point::new(10.0, 10.0),
-        Point::new(90.0, 10.0),
-        Point::new(90.0, 40.0),
-        Point::new(10.0, 40.0),
+        point_xy(10.0, 10.0),
+        point_xy(90.0, 10.0),
+        point_xy(90.0, 40.0),
+        point_xy(10.0, 40.0),
     ]);
     Part {
         boundary: create_ring(boundary_poly, "boundary").expect("ring"),
@@ -57,18 +57,18 @@ fn simple_part_with_headland() -> Part {
 
 fn irregular_part_with_headland() -> Part {
     let boundary = polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(120.0, 0.0),
-        Point::new(120.0, 70.0),
-        Point::new(70.0, 90.0),
-        Point::new(0.0, 80.0),
+        point_xy(0.0, 0.0),
+        point_xy(120.0, 0.0),
+        point_xy(120.0, 70.0),
+        point_xy(70.0, 90.0),
+        point_xy(0.0, 80.0),
     ]);
     let headland = polygon_from_points(vec![
-        Point::new(10.0, 10.0),
-        Point::new(105.0, 12.0),
-        Point::new(102.0, 58.0),
-        Point::new(62.0, 74.0),
-        Point::new(12.0, 68.0),
+        point_xy(10.0, 10.0),
+        point_xy(105.0, 12.0),
+        point_xy(102.0, 58.0),
+        point_xy(62.0, 74.0),
+        point_xy(12.0, 68.0),
     ]);
     Part {
         boundary: create_ring(boundary, "boundary").expect("ring"),
@@ -322,15 +322,15 @@ fn decomposed_parts_can_be_routed_and_toured() {
 fn direct_turn_is_preferred_for_close_swaths() {
     let part = simple_part_with_headland();
     let mut from = create_swath(
-        Point::new(20.0, 10.0),
-        Point::new(20.0, 40.0),
+        point_xy(20.0, 10.0),
+        point_xy(20.0, 40.0),
         SwathType::Swath,
         "a",
     );
     from.width = 10.0;
     let mut to = create_swath(
-        Point::new(30.0, 40.0),
-        Point::new(30.0, 10.0),
+        point_xy(30.0, 40.0),
+        point_xy(30.0, 10.0),
         SwathType::Swath,
         "b",
     );
@@ -360,15 +360,15 @@ fn direct_turn_is_preferred_for_close_swaths() {
 fn headland_route_is_preferred_for_far_swaths() {
     let part = simple_part_with_headland();
     let mut from = create_swath(
-        Point::new(20.0, 10.0),
-        Point::new(20.0, 40.0),
+        point_xy(20.0, 10.0),
+        point_xy(20.0, 40.0),
         SwathType::Swath,
         "a",
     );
     from.width = 10.0;
     let to = create_swath(
-        Point::new(80.0, 10.0),
-        Point::new(80.0, 40.0),
+        point_xy(80.0, 10.0),
+        point_xy(80.0, 40.0),
         SwathType::Swath,
         "b",
     );
@@ -397,15 +397,15 @@ fn headland_route_is_preferred_for_far_swaths() {
 fn forced_headland_mode_always_uses_headland_route_when_available() {
     let part = simple_part_with_headland();
     let mut from = create_swath(
-        Point::new(20.0, 10.0),
-        Point::new(20.0, 40.0),
+        point_xy(20.0, 10.0),
+        point_xy(20.0, 40.0),
         SwathType::Swath,
         "a",
     );
     from.width = 10.0;
     let to = create_swath(
-        Point::new(80.0, 10.0),
-        Point::new(80.0, 40.0),
+        point_xy(80.0, 10.0),
+        point_xy(80.0, 40.0),
         SwathType::Swath,
         "b",
     );
@@ -436,15 +436,15 @@ fn forced_headland_mode_always_uses_headland_route_when_available() {
 fn irregular_headland_ring_routing_uses_polyline_path() {
     let part = irregular_part_with_headland();
     let mut from = create_swath(
-        Point::new(20.0, 12.0),
-        Point::new(20.0, 60.0),
+        point_xy(20.0, 12.0),
+        point_xy(20.0, 60.0),
         SwathType::Swath,
         "a",
     );
     from.width = 8.0;
     let to = create_swath(
-        Point::new(92.0, 16.0),
-        Point::new(92.0, 55.0),
+        point_xy(92.0, 16.0),
+        point_xy(92.0, 55.0),
         SwathType::Swath,
         "b",
     );
@@ -467,7 +467,7 @@ fn irregular_headland_ring_routing_uses_polyline_path() {
     assert!(
         ring_like
             .iter()
-            .any(|swath| swath.bounding_box.max().x > swath.bounding_box.min().x)
+            .any(|swath| swath.bounding_box.max_point.x > swath.bounding_box.min_point.x)
     );
 }
 
@@ -475,15 +475,15 @@ fn irregular_headland_ring_routing_uses_polyline_path() {
 fn tiny_headland_entry_exit_hops_do_not_create_triangle_loops() {
     let part = simple_part_with_headland();
     let mut from = create_swath(
-        Point::new(20.0, 10.0),
-        Point::new(20.0, 40.0),
+        point_xy(20.0, 10.0),
+        point_xy(20.0, 40.0),
         SwathType::Swath,
         "a",
     );
     from.width = 10.0;
     let mut to = create_swath(
-        Point::new(22.0, 40.0),
-        Point::new(22.0, 10.0),
+        point_xy(22.0, 40.0),
+        point_xy(22.0, 10.0),
         SwathType::Swath,
         "b",
     );

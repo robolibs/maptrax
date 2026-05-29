@@ -1,5 +1,5 @@
 use concord::{Geo, Wgs, to_enu};
-use geo::Point;
+use maptrax::{Point, Point2Ext, point_xy, polygon_exterior_points};
 use maptrax::{
     Balance, DivisionPattern, DivisionPlan, Divy, Field, MachineProfile, OptimizeObjective,
     polygon_from_points, segment_length,
@@ -7,10 +7,10 @@ use maptrax::{
 
 fn rect_field(swath_width: f64) -> Field {
     let polygon = polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(100.0, 0.0),
-        Point::new(100.0, 50.0),
-        Point::new(0.0, 50.0),
+        point_xy(0.0, 0.0),
+        point_xy(100.0, 0.0),
+        point_xy(100.0, 50.0),
+        point_xy(0.0, 50.0),
     ]);
     let mut field = Field::new(polygon, Geo::new(51.0, 5.0, 0.0)).expect("field");
     field.gen_field(swath_width, 90.0, 0).expect("generated");
@@ -33,7 +33,7 @@ fn upstream_field() -> Field {
         .into_iter()
         .map(|wgs| {
             let enu = to_enu(datum, wgs);
-            Point::new(enu.east(), enu.north())
+            point_xy(enu.east(), enu.north())
         })
         .collect::<Vec<Point>>(),
     );
@@ -80,10 +80,10 @@ fn stripe_stride_2_interleaves_in_pairs() {
     // 12 rows, 2 machines, stride=2 → pattern: 0 0 1 1 0 0 1 1 0 0 1 1
     // Each machine owns 6 rows; rows 0–1, 4–5, 8–9 for machine 0.
     let polygon = polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(120.0, 0.0),
-        Point::new(120.0, 40.0),
-        Point::new(0.0, 40.0),
+        point_xy(0.0, 0.0),
+        point_xy(120.0, 0.0),
+        point_xy(120.0, 40.0),
+        point_xy(0.0, 40.0),
     ]);
     let mut field = Field::new(polygon, Geo::new(51.0, 5.0, 0.0)).expect("field");
     field.gen_field(10.0, 90.0, 0).expect("generated");
@@ -324,7 +324,7 @@ fn split_by_zone_covers_each_ring_without_double_counting() {
         .headlands
         .iter()
         .map(|ring| {
-            let pts: Vec<_> = ring.polygon.exterior().points().collect();
+            let pts = polygon_exterior_points(&ring.polygon);
             pts.windows(2)
                 .map(|pair| point_distance(pair[0], pair[1]))
                 .sum::<f64>()

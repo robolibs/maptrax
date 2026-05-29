@@ -1,5 +1,5 @@
 use concord::{Geo, Wgs, to_enu};
-use geo::{Point, Polygon};
+use maptrax::{Point, Point2Ext, Polygon, point_xy};
 use maptrax::{
     DecompositionMode, Field, SwathAngleSearchOptions, SwathObjective,
     generate_headlands_for_polygon, generate_swaths_for_polygon, polygon_area, polygon_from_points,
@@ -8,32 +8,32 @@ use maptrax::{
 
 fn test_polygon() -> Polygon {
     polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(100.0, 0.0),
-        Point::new(100.0, 50.0),
-        Point::new(0.0, 50.0),
+        point_xy(0.0, 0.0),
+        point_xy(100.0, 0.0),
+        point_xy(100.0, 50.0),
+        point_xy(0.0, 50.0),
     ])
 }
 
 fn irregular_fixture_polygon() -> Polygon {
     polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(120.0, 10.0),
-        Point::new(140.0, 60.0),
-        Point::new(90.0, 95.0),
-        Point::new(30.0, 85.0),
-        Point::new(-10.0, 40.0),
+        point_xy(0.0, 0.0),
+        point_xy(120.0, 10.0),
+        point_xy(140.0, 60.0),
+        point_xy(90.0, 95.0),
+        point_xy(30.0, 85.0),
+        point_xy(-10.0, 40.0),
     ])
 }
 
 fn concave_fixture_polygon() -> Polygon {
     polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(120.0, 0.0),
-        Point::new(120.0, 30.0),
-        Point::new(70.0, 30.0),
-        Point::new(70.0, 90.0),
-        Point::new(0.0, 90.0),
+        point_xy(0.0, 0.0),
+        point_xy(120.0, 0.0),
+        point_xy(120.0, 30.0),
+        point_xy(70.0, 30.0),
+        point_xy(70.0, 90.0),
+        point_xy(0.0, 90.0),
     ])
 }
 
@@ -139,10 +139,10 @@ fn swath_points_and_bounding_boxes_match_generated_geometry() {
         assert_eq!(swath.points.len(), 2);
         assert_eq!(swath.points[0], swath.head());
         assert_eq!(swath.points[1], swath.tail());
-        assert!(swath.bounding_box.min().x <= swath.head().x());
-        assert!(swath.bounding_box.max().x >= swath.tail().x());
-        assert!(swath.bounding_box.min().y <= swath.head().y());
-        assert!(swath.bounding_box.max().y >= swath.tail().y());
+        assert!(swath.bounding_box.min_point.x <= swath.head().x());
+        assert!(swath.bounding_box.max_point.x >= swath.tail().x());
+        assert!(swath.bounding_box.min_point.y <= swath.head().y());
+        assert!(swath.bounding_box.max_point.y >= swath.tail().y());
         let dx = swath.tail().x() - swath.head().x();
         let dy = swath.tail().y() - swath.head().y();
         assert!(dx * 45f64.to_radians().cos() + dy * 45f64.to_radians().sin() >= -1e-9);
@@ -166,7 +166,7 @@ fn headlands_are_generated_for_irregular_upstream_shape() {
         .into_iter()
         .map(|wgs| {
             let enu = to_enu(datum, wgs);
-            Point::new(enu.east(), enu.north())
+            point_xy(enu.east(), enu.north())
         })
         .collect(),
     );
@@ -284,7 +284,7 @@ fn objective_search_matches_compatibility_auto_on_upstream_fixture() {
         .into_iter()
         .map(|wgs| {
             let enu = to_enu(datum, wgs);
-            Point::new(enu.east(), enu.north())
+            point_xy(enu.east(), enu.north())
         })
         .collect(),
     );

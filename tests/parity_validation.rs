@@ -1,5 +1,5 @@
 use concord::{Geo, Wgs, to_enu};
-use geo::{Point, Polygon};
+use maptrax::{Point, Point2Ext, Polygon, point_xy};
 use maptrax::{
     Balance, DivisionPattern, DivisionPlan, Divy, Dubins, Field, Maptrax, Nety, Pose2D, ReedsShepp,
     Sharper, SwathType, TourBuilder, TurnPlannerConfig, polygon_from_points,
@@ -15,10 +15,10 @@ fn stripe_plan(machines: usize) -> DivisionPlan {
 
 fn rect() -> Polygon {
     polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(100.0, 0.0),
-        Point::new(100.0, 50.0),
-        Point::new(0.0, 50.0),
+        point_xy(0.0, 0.0),
+        point_xy(100.0, 0.0),
+        point_xy(100.0, 50.0),
+        point_xy(0.0, 50.0),
     ])
 }
 
@@ -37,7 +37,7 @@ fn upstream_polygon(datum: Geo) -> Polygon {
         .into_iter()
         .map(|wgs| {
             let enu = to_enu(datum, wgs);
-            Point::new(enu.east(), enu.north())
+            point_xy(enu.east(), enu.north())
         })
         .collect(),
     )

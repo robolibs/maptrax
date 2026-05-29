@@ -1,11 +1,11 @@
-use concord::Geo;
-use geo::{Point, Polygon};
+use crate::Geo;
 
 use crate::core::{
-    Aabb, MaptraxError, Result, Segment, aabb_from_points, aabb_height, aabb_width, next_id,
-    point_distance, points_equal, polygon_aabb, polygon_area, polygon_ensure_ccw,
-    polygon_from_points, polygon_is_axis_aligned_rectangle, polygon_open_vertices, polygon_shrink,
-    remove_colinear_points, segment_end, segment_length, segment_new, segment_start,
+    Aabb, MaptraxError, Point, Point2Ext, Polygon, Result, Segment, aabb_from_points, aabb_height,
+    aabb_width, next_id, point_distance, points_equal, polygon_aabb, polygon_area,
+    polygon_ensure_ccw, polygon_from_points, polygon_is_axis_aligned_rectangle,
+    point_xy, polygon_open_vertices, polygon_shrink, remove_colinear_points, segment_end,
+    segment_length, segment_new, segment_start,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -476,12 +476,12 @@ fn snap_inset_vertices_to_splits(
                 match *boundary {
                     SplitBoundary::Vertical { x } => {
                         if (pt.x() - x).abs() < threshold {
-                            pt = Point::new(x, pt.y());
+                            pt = point_xy(x, pt.y());
                         }
                     }
                     SplitBoundary::Horizontal { y } => {
                         if (pt.y() - y).abs() < threshold {
-                            pt = Point::new(pt.x(), y);
+                            pt = point_xy(pt.x(), y);
                         }
                     }
                 }
@@ -549,7 +549,7 @@ pub fn generate_swaths_for_polygon(
         let y1 = cy - offset * cos_a - line_ext * sin_a;
         let x2 = cx + offset * sin_a + line_ext * cos_a;
         let y2 = cy - offset * cos_a + line_ext * sin_a;
-        let ray = segment_new(Point::new(x1, y1), Point::new(x2, y2));
+        let ray = segment_new(point_xy(x1, y1), point_xy(x2, y2));
 
         for seg in clip_segment_to_polygon(ray, polygon) {
             let start = segment_start(seg);
@@ -694,7 +694,7 @@ fn generate_swaths_with_explicit_angle(
         let y1 = cy - offset * cos_a - line_ext * sin_a;
         let x2 = cx + offset * sin_a + line_ext * cos_a;
         let y2 = cy - offset * cos_a + line_ext * sin_a;
-        let ray = segment_new(Point::new(x1, y1), Point::new(x2, y2));
+        let ray = segment_new(point_xy(x1, y1), point_xy(x2, y2));
 
         for seg in clip_segment_to_polygon(ray, polygon) {
             let start = segment_start(seg);
@@ -750,13 +750,13 @@ fn orient_segment_points(start: Point, end: Point, tangent: (f64, f64)) -> (Poin
 fn polygon_centroid(polygon: &Polygon) -> Point {
     let verts = polygon_open_vertices(polygon);
     if verts.is_empty() {
-        return Point::new(0.0, 0.0);
+        return point_xy(0.0, 0.0);
     }
     if verts.len() == 1 {
         return verts[0];
     }
     if verts.len() == 2 {
-        return Point::new(
+        return point_xy(
             (verts[0].x() + verts[1].x()) * 0.5,
             (verts[0].y() + verts[1].y()) * 0.5,
         );
@@ -777,11 +777,11 @@ fn polygon_centroid(polygon: &Polygon) -> Point {
     if signed_area.abs() < 1e-10 {
         let sx: f64 = verts.iter().map(|p| p.x()).sum();
         let sy: f64 = verts.iter().map(|p| p.y()).sum();
-        return Point::new(sx / verts.len() as f64, sy / verts.len() as f64);
+        return point_xy(sx / verts.len() as f64, sy / verts.len() as f64);
     }
 
     let factor = 1.0 / (6.0 * signed_area);
-    Point::new(cx * factor, cy * factor)
+    point_xy(cx * factor, cy * factor)
 }
 
 fn clip_segment_to_polygon(segment: Segment, polygon: &Polygon) -> Vec<Segment> {
@@ -798,7 +798,7 @@ fn clip_segment_to_polygon(segment: Segment, polygon: &Polygon) -> Vec<Segment> 
 
     let seg_start = segment_start(segment);
     let seg_end = segment_end(segment);
-    let seg_dir = Point::new(seg_end.x() - seg_start.x(), seg_end.y() - seg_start.y());
+    let seg_dir = point_xy(seg_end.x() - seg_start.x(), seg_end.y() - seg_start.y());
     let mut intersections = Vec::new();
 
     for i in 0..ring.len() {
@@ -818,7 +818,7 @@ fn clip_segment_to_polygon(segment: Segment, polygon: &Polygon) -> Vec<Segment> 
         if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
             intersections.push(Intersection {
                 t,
-                point: Point::new(
+                point: point_xy(
                     seg_start.x() + t * seg_dir.x(),
                     seg_start.y() + t * seg_dir.y(),
                 ),
@@ -1093,11 +1093,7 @@ where
         prev_inside = current_inside;
     }
 
-    output = remove_colinear_points(&polygon_from_points(output), 1e-6)
-        .exterior()
-        .points()
-        .map(|point| Point::new(point.x(), point.y()))
-        .collect();
+    output = polygon_open_vertices(&remove_colinear_points(&polygon_from_points(output), 1e-6));
     if output.first() == output.last() {
         output.pop();
     }
@@ -1109,19 +1105,19 @@ fn intersection_on_axis(a: Point, b: Point, boundary: AxisBoundary) -> Point {
         AxisBoundary::Vertical(x) => {
             let dx = b.x() - a.x();
             if dx.abs() <= 1e-12 {
-                Point::new(x, a.y())
+                point_xy(x, a.y())
             } else {
                 let t = (x - a.x()) / dx;
-                Point::new(x, a.y() + t * (b.y() - a.y()))
+                point_xy(x, a.y() + t * (b.y() - a.y()))
             }
         }
         AxisBoundary::Horizontal(y) => {
             let dy = b.y() - a.y();
             if dy.abs() <= 1e-12 {
-                Point::new(a.x(), y)
+                point_xy(a.x(), y)
             } else {
                 let t = (y - a.y()) / dy;
-                Point::new(a.x() + t * (b.x() - a.x()), y)
+                point_xy(a.x() + t * (b.x() - a.x()), y)
             }
         }
     }

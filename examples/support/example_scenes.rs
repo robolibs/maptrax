@@ -1,8 +1,7 @@
 #![allow(dead_code)]
 
-use concord::{Geo, Wgs, to_enu};
-use geo::{Point, Polygon};
-use maptrax::{Swath, SwathType, polygon_from_points};
+use concord::{Wgs, to_enu};
+use maptrax::{Geo, Point, Polygon, Swath, SwathType, point_xy, polygon_from_points};
 
 pub fn upstream_datum() -> Geo {
     Geo::new(51.98954034749562, 5.6584737410504715, 53.801823)
@@ -24,7 +23,7 @@ pub fn upstream_field_polygon(datum: Geo) -> Polygon {
         .into_iter()
         .map(|wgs| {
             let enu = to_enu(datum, wgs);
-            Point::new(enu.east(), enu.north())
+            point_xy(enu.east(), enu.north())
         })
         .collect();
     polygon_from_points(points)
@@ -32,12 +31,12 @@ pub fn upstream_field_polygon(datum: Geo) -> Polygon {
 
 pub fn concave_demo_polygon() -> Polygon {
     polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(140.0, 0.0),
-        Point::new(140.0, 34.0),
-        Point::new(82.0, 34.0),
-        Point::new(82.0, 102.0),
-        Point::new(0.0, 102.0),
+        point_xy(0.0, 0.0),
+        point_xy(140.0, 0.0),
+        point_xy(140.0, 34.0),
+        point_xy(82.0, 34.0),
+        point_xy(82.0, 102.0),
+        point_xy(0.0, 102.0),
     ])
 }
 

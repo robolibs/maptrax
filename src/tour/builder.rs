@@ -1,8 +1,7 @@
-use geo::{Point, Polygon};
-
 use crate::core::{
-    aabb_from_points, angle_difference, heading_between, point_distance, points_equal,
-    polygon_open_vertices, segment_end, segment_new, segment_start,
+    Point, Point2Ext, Polygon, Segment, aabb_from_points, angle_difference, heading_between,
+    point_distance, point_xy, points_equal, polygon_open_vertices, segment_end, segment_new,
+    segment_start,
 };
 use crate::field::{Part, Swath, SwathType, create_swath};
 use crate::turners::{Dubins, Pose2D, ReedsShepp, Sharper};
@@ -542,7 +541,7 @@ fn path_stays_outside(path: &[Point], polygon: &Polygon) -> bool {
         // segment's endpoint check covers them).
         for s in 1..samples {
             let t = s as f64 / samples as f64;
-            let p = Point::new(a.x() + t * (b.x() - a.x()), a.y() + t * (b.y() - a.y()));
+            let p = point_xy(a.x() + t * (b.x() - a.x()), a.y() + t * (b.y() - a.y()));
             if point_strictly_inside(p, polygon) {
                 return false;
             }
@@ -574,7 +573,7 @@ fn point_strictly_inside(point: Point, polygon: &Polygon) -> bool {
     true
 }
 
-fn segment_distance_to_point(segment: geo::Line<f64>, point: Point) -> f64 {
+fn segment_distance_to_point(segment: Segment, point: Point) -> f64 {
     let a = segment_start(segment);
     let b = segment_end(segment);
     let abx = b.x() - a.x();
@@ -585,7 +584,7 @@ fn segment_distance_to_point(segment: geo::Line<f64>, point: Point) -> f64 {
     }
     let t = (((point.x() - a.x()) * abx) + ((point.y() - a.y()) * aby)) / denom;
     let t = t.clamp(0.0, 1.0);
-    let projected = Point::new(a.x() + abx * t, a.y() + aby * t);
+    let projected = point_xy(a.x() + abx * t, a.y() + aby * t);
     point_distance(point, projected)
 }
 
@@ -635,11 +634,11 @@ fn smooth_headland_path(points: &[Point], cfg: &TurnPlannerConfig) -> Vec<Point>
             continue;
         }
 
-        let corner_in = Point::new(
+        let corner_in = point_xy(
             corner.x() + (prev.x() - corner.x()) * (trim / in_len),
             corner.y() + (prev.y() - corner.y()) * (trim / in_len),
         );
-        let corner_out = Point::new(
+        let corner_out = point_xy(
             corner.x() + (next.x() - corner.x()) * (trim / out_len),
             corner.y() + (next.y() - corner.y()) * (trim / out_len),
         );
@@ -706,7 +705,7 @@ fn project_to_ring(ring: &Polygon, point: Point) -> Option<Projection> {
             (((point.x() - ax) * abx) + ((point.y() - ay) * aby)) / denom
         }
         .clamp(0.0, 1.0);
-        let projected = Point::new(ax + abx * t, ay + aby * t);
+        let projected = point_xy(ax + abx * t, ay + aby * t);
         let distance = point_distance(point, projected);
         if distance < best_distance {
             best_distance = distance;

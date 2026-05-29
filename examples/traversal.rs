@@ -1,13 +1,11 @@
-use concord::Geo;
-use geo::Point;
-use maptrax::{Field, Nety, polygon_from_points};
+use maptrax::{Field, Geo, Nety, point_xy, polygon_from_points};
 
 fn main() {
     let polygon = polygon_from_points(vec![
-        Point::new(0.0, 0.0),
-        Point::new(100.0, 0.0),
-        Point::new(100.0, 50.0),
-        Point::new(0.0, 50.0),
+        point_xy(0.0, 0.0),
+        point_xy(100.0, 0.0),
+        point_xy(100.0, 50.0),
+        point_xy(0.0, 50.0),
     ]);
 
     let mut field = Field::new(polygon, Geo::new(51.0, 5.0, 0.0)).expect("field");

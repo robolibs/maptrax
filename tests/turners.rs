@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use geo::Point;
+use maptrax::{Point, Point2Ext, point_xy};
 use maptrax::{
     Dubins, DubinsSegmentType, Pose2D, ReedsShepp, ReedsSheppSegmentType, Sharper, point_distance,
 };
@@ -222,8 +222,8 @@ fn reeds_shepp_matches_reference_case_2() {
 
 #[test]
 fn sharper_auto_same_point_matches_reference_pattern() {
-    let start = Pose2D::from_point(Point::new(0.0, 0.0), 0.0);
-    let goal = Pose2D::from_point(Point::new(0.0, 0.0), PI);
+    let start = Pose2D::from_point(point_xy(0.0, 0.0), 0.0);
+    let goal = Pose2D::from_point(point_xy(0.0, 0.0), PI);
 
     let sharper = Sharper::new(1.0, 4.0, 2.0);
     let path = sharper.plan_sharp_turn(start, goal, "auto");
@@ -246,8 +246,8 @@ fn sharper_auto_same_point_matches_reference_pattern() {
 
 #[test]
 fn sharper_auto_far_matches_reference_pattern() {
-    let start = Pose2D::from_point(Point::new(0.0, 0.0), 0.0);
-    let goal = Pose2D::from_point(Point::new(6.0, 2.0), 1.0);
+    let start = Pose2D::from_point(point_xy(0.0, 0.0), 0.0);
+    let goal = Pose2D::from_point(point_xy(6.0, 2.0), 1.0);
 
     let sharper = Sharper::new(1.0, 4.0, 2.0);
     let path = sharper.plan_sharp_turn(start, goal, "auto");
@@ -272,8 +272,8 @@ fn sharper_auto_far_matches_reference_pattern() {
 
 #[test]
 fn sharper_explicit_bulb_matches_reference_pattern() {
-    let start = Pose2D::from_point(Point::new(0.0, 0.0), 0.0);
-    let goal = Pose2D::from_point(Point::new(6.0, 2.0), 1.0);
+    let start = Pose2D::from_point(point_xy(0.0, 0.0), 0.0);
+    let goal = Pose2D::from_point(point_xy(6.0, 2.0), 1.0);
 
     let sharper = Sharper::new(1.0, 4.0, 2.0);
     let path = sharper.plan_sharp_turn(start, goal, "bulb");
