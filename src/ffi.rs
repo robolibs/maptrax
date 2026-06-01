@@ -1,3 +1,15 @@
+//! C ABI for maptrax.
+//!
+//! Conventions: opaque Box-backed handles (free with the matching
+//! *_free); fallible calls return bool/int with the reason in the
+//! thread-local maptrax_last_error_message(); borrowed views are valid
+//! only for the lifetime documented by the handle they came from.
+//!
+//! `include/maptrax.h` is generated from this file by cbindgen.
+
+// extern "C" fns take raw pointers from C and deref them by design.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char};
 use std::ptr;
@@ -123,7 +135,7 @@ pub struct MaptraxPoseBufferView {
     pub name: *const c_char,
 }
 
-pub struct MaptraxPlannerHandle {
+pub struct MaptraxPlanner {
     planner: Maptrax,
 }
 
@@ -132,12 +144,12 @@ struct FlatSwathBuffer {
     points: Vec<MaptraxCoord2>,
 }
 
-pub struct MaptraxPlanResultHandle {
+pub struct MaptraxPlanResult {
     ordered: FlatSwathBuffer,
     tour: FlatSwathBuffer,
 }
 
-pub struct MaptraxPartSnapshotHandle {
+pub struct MaptraxPartSnapshot {
     boundary: FlatRingBuffer,
     headlands: FlatRingBuffer,
     swaths: FlatSwathBuffer,
@@ -164,14 +176,14 @@ struct FlatRingBuffer {
     points: Vec<MaptraxCoord2>,
 }
 
-pub struct MaptraxStagesResultHandle {
+pub struct MaptraxStagesResult {
     headlands: FlatRingBuffer,
     generated: FlatSwathBuffer,
     ordered: FlatSwathBuffer,
     tour: FlatSwathBuffer,
 }
 
-pub struct MaptraxPosePathHandle {
+pub struct MaptraxPosePath {
     poses: Vec<MaptraxPose2>,
     total_length: f64,
     name: CString,
@@ -205,9 +217,7 @@ fn bool_result<T>(result: crate::Result<T>) -> bool {
     }
 }
 
-fn planner_from_ptr_mut<'a>(
-    planner: *mut MaptraxPlannerHandle,
-) -> crate::Result<&'a mut MaptraxPlannerHandle> {
+fn planner_from_ptr_mut<'a>(planner: *mut MaptraxPlanner) -> crate::Result<&'a mut MaptraxPlanner> {
     if planner.is_null() {
         return Err(crate::MaptraxError::InvalidPolygon("null planner handle"));
     }
@@ -215,9 +225,7 @@ fn planner_from_ptr_mut<'a>(
     Ok(unsafe { &mut *planner })
 }
 
-fn planner_from_ptr<'a>(
-    planner: *const MaptraxPlannerHandle,
-) -> crate::Result<&'a MaptraxPlannerHandle> {
+fn planner_from_ptr<'a>(planner: *const MaptraxPlanner) -> crate::Result<&'a MaptraxPlanner> {
     if planner.is_null() {
         return Err(crate::MaptraxError::InvalidPolygon("null planner handle"));
     }
@@ -338,7 +346,7 @@ fn flatten_rings(rings: &[crate::Ring]) -> FlatRingBuffer {
     }
 }
 
-fn pose_buffer_view(handle: &MaptraxPosePathHandle) -> MaptraxPoseBufferView {
+fn pose_buffer_view(handle: &MaptraxPosePath) -> MaptraxPoseBufferView {
     MaptraxPoseBufferView {
         poses: handle.poses.as_ptr(),
         poses_len: handle.poses.len(),
@@ -369,8 +377,8 @@ fn pose_path_handle_from_path(
     name: String,
     total_length: f64,
     waypoints: Vec<Pose2D>,
-) -> *mut MaptraxPosePathHandle {
-    let handle = MaptraxPosePathHandle {
+) -> *mut MaptraxPosePath {
+    let handle = MaptraxPosePath {
         poses: waypoints
             .into_iter()
             .map(|pose| MaptraxPose2 {
@@ -409,15 +417,15 @@ pub extern "C" fn maptrax_last_error_message() -> *const c_char {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn maptrax_planner_new() -> *mut MaptraxPlannerHandle {
+pub extern "C" fn maptrax_planner_new() -> *mut MaptraxPlanner {
     clear_last_error();
-    Box::into_raw(Box::new(MaptraxPlannerHandle {
+    Box::into_raw(Box::new(MaptraxPlanner {
         planner: Maptrax::new(),
     }))
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn maptrax_planner_free(planner: *mut MaptraxPlannerHandle) {
+pub extern "C" fn maptrax_planner_free(planner: *mut MaptraxPlanner) {
     if planner.is_null() {
         return;
     }
@@ -429,7 +437,7 @@ pub extern "C" fn maptrax_planner_free(planner: *mut MaptraxPlannerHandle) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_planner_set_field(
-    planner: *mut MaptraxPlannerHandle,
+    planner: *mut MaptraxPlanner,
     coords: *const MaptraxCoord2,
     coords_len: usize,
     datum: MaptraxGeo3,
@@ -448,7 +456,7 @@ pub extern "C" fn maptrax_planner_set_field(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_planner_generate_field(
-    planner: *mut MaptraxPlannerHandle,
+    planner: *mut MaptraxPlanner,
     options: MaptraxFieldOptions,
 ) -> bool {
     let result = (|| {
@@ -463,7 +471,7 @@ pub extern "C" fn maptrax_planner_generate_field(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn maptrax_planner_part_count(planner: *const MaptraxPlannerHandle) -> usize {
+pub extern "C" fn maptrax_planner_part_count(planner: *const MaptraxPlanner) -> usize {
     match planner_from_ptr(planner).and_then(|planner| Ok(planner.planner.field()?.parts().len())) {
         Ok(count) => {
             clear_last_error();
@@ -477,7 +485,7 @@ pub extern "C" fn maptrax_planner_part_count(planner: *const MaptraxPlannerHandl
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn maptrax_planner_total_area(planner: *const MaptraxPlannerHandle) -> f64 {
+pub extern "C" fn maptrax_planner_total_area(planner: *const MaptraxPlanner) -> f64 {
     match planner_from_ptr(planner).and_then(|planner| Ok(planner.planner.field()?.total_area())) {
         Ok(area) => {
             clear_last_error();
@@ -492,13 +500,13 @@ pub extern "C" fn maptrax_planner_total_area(planner: *const MaptraxPlannerHandl
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_planner_part_snapshot(
-    planner: *const MaptraxPlannerHandle,
+    planner: *const MaptraxPlanner,
     part_index: usize,
-) -> *mut MaptraxPartSnapshotHandle {
+) -> *mut MaptraxPartSnapshot {
     let result = (|| {
         let planner = planner_from_ptr(planner)?;
         let part = planner.planner.field()?.part(part_index)?;
-        Ok::<_, crate::MaptraxError>(MaptraxPartSnapshotHandle {
+        Ok::<_, crate::MaptraxError>(MaptraxPartSnapshot {
             boundary: flatten_rings(std::slice::from_ref(&part.boundary)),
             headlands: flatten_rings(&part.headlands),
             swaths: flatten_swaths(&part.swaths),
@@ -519,11 +527,11 @@ pub extern "C" fn maptrax_planner_part_snapshot(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_planner_plan_part(
-    planner: *const MaptraxPlannerHandle,
+    planner: *const MaptraxPlanner,
     part_index: usize,
     routing: MaptraxRoutingOptions,
     turn: MaptraxTurnOptions,
-) -> *mut MaptraxPlanResultHandle {
+) -> *mut MaptraxPlanResult {
     let result = (|| {
         let planner = planner_from_ptr(planner)?;
         let planned = planner.planner.plan_tour_for_part(
@@ -531,7 +539,7 @@ pub extern "C" fn maptrax_planner_plan_part(
             routing_options_from_ffi(routing),
             &turn_options_from_ffi(turn),
         )?;
-        Ok::<_, crate::MaptraxError>(MaptraxPlanResultHandle {
+        Ok::<_, crate::MaptraxError>(MaptraxPlanResult {
             ordered: flatten_swaths(&planned.ordered_swaths),
             tour: flatten_swaths(&planned.tour),
         })
@@ -551,11 +559,11 @@ pub extern "C" fn maptrax_planner_plan_part(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_planner_plan_stages_part(
-    planner: *const MaptraxPlannerHandle,
+    planner: *const MaptraxPlanner,
     part_index: usize,
     routing: MaptraxRoutingOptions,
     turn: MaptraxTurnOptions,
-) -> *mut MaptraxStagesResultHandle {
+) -> *mut MaptraxStagesResult {
     let result = (|| {
         let planner = planner_from_ptr(planner)?;
         let staged = planner.planner.plan_stages_for_part(
@@ -563,7 +571,7 @@ pub extern "C" fn maptrax_planner_plan_stages_part(
             routing_options_from_ffi(routing),
             &turn_options_from_ffi(turn),
         )?;
-        Ok::<_, crate::MaptraxError>(MaptraxStagesResultHandle {
+        Ok::<_, crate::MaptraxError>(MaptraxStagesResult {
             headlands: flatten_rings(&staged.headlands),
             generated: flatten_swaths(&staged.generated_swaths),
             ordered: flatten_swaths(&staged.ordered_swaths),
@@ -584,7 +592,7 @@ pub extern "C" fn maptrax_planner_plan_stages_part(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn maptrax_plan_result_free(result: *mut MaptraxPlanResultHandle) {
+pub extern "C" fn maptrax_plan_result_free(result: *mut MaptraxPlanResult) {
     if result.is_null() {
         return;
     }
@@ -595,7 +603,7 @@ pub extern "C" fn maptrax_plan_result_free(result: *mut MaptraxPlanResultHandle)
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn maptrax_stages_result_free(result: *mut MaptraxStagesResultHandle) {
+pub extern "C" fn maptrax_stages_result_free(result: *mut MaptraxStagesResult) {
     if result.is_null() {
         return;
     }
@@ -606,7 +614,7 @@ pub extern "C" fn maptrax_stages_result_free(result: *mut MaptraxStagesResultHan
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn maptrax_part_snapshot_free(snapshot: *mut MaptraxPartSnapshotHandle) {
+pub extern "C" fn maptrax_part_snapshot_free(snapshot: *mut MaptraxPartSnapshot) {
     if snapshot.is_null() {
         return;
     }
@@ -618,7 +626,7 @@ pub extern "C" fn maptrax_part_snapshot_free(snapshot: *mut MaptraxPartSnapshotH
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_plan_result_ordered_view(
-    result: *const MaptraxPlanResultHandle,
+    result: *const MaptraxPlanResult,
 ) -> MaptraxSwathBufferView {
     if result.is_null() {
         return MaptraxSwathBufferView {
@@ -634,7 +642,7 @@ pub extern "C" fn maptrax_plan_result_ordered_view(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_stages_result_headlands_view(
-    result: *const MaptraxStagesResultHandle,
+    result: *const MaptraxStagesResult,
 ) -> MaptraxRingBufferView {
     if result.is_null() {
         return MaptraxRingBufferView {
@@ -649,7 +657,7 @@ pub extern "C" fn maptrax_stages_result_headlands_view(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_part_snapshot_boundary_view(
-    snapshot: *const MaptraxPartSnapshotHandle,
+    snapshot: *const MaptraxPartSnapshot,
 ) -> MaptraxRingBufferView {
     if snapshot.is_null() {
         return MaptraxRingBufferView {
@@ -664,7 +672,7 @@ pub extern "C" fn maptrax_part_snapshot_boundary_view(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_part_snapshot_headlands_view(
-    snapshot: *const MaptraxPartSnapshotHandle,
+    snapshot: *const MaptraxPartSnapshot,
 ) -> MaptraxRingBufferView {
     if snapshot.is_null() {
         return MaptraxRingBufferView {
@@ -679,7 +687,7 @@ pub extern "C" fn maptrax_part_snapshot_headlands_view(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_part_snapshot_swaths_view(
-    snapshot: *const MaptraxPartSnapshotHandle,
+    snapshot: *const MaptraxPartSnapshot,
 ) -> MaptraxSwathBufferView {
     if snapshot.is_null() {
         return MaptraxSwathBufferView {
@@ -694,7 +702,7 @@ pub extern "C" fn maptrax_part_snapshot_swaths_view(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_stages_result_generated_view(
-    result: *const MaptraxStagesResultHandle,
+    result: *const MaptraxStagesResult,
 ) -> MaptraxSwathBufferView {
     if result.is_null() {
         return MaptraxSwathBufferView {
@@ -709,7 +717,7 @@ pub extern "C" fn maptrax_stages_result_generated_view(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_stages_result_ordered_view(
-    result: *const MaptraxStagesResultHandle,
+    result: *const MaptraxStagesResult,
 ) -> MaptraxSwathBufferView {
     if result.is_null() {
         return MaptraxSwathBufferView {
@@ -724,7 +732,7 @@ pub extern "C" fn maptrax_stages_result_ordered_view(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_stages_result_tour_view(
-    result: *const MaptraxStagesResultHandle,
+    result: *const MaptraxStagesResult,
 ) -> MaptraxSwathBufferView {
     if result.is_null() {
         return MaptraxSwathBufferView {
@@ -739,7 +747,7 @@ pub extern "C" fn maptrax_stages_result_tour_view(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_plan_result_tour_view(
-    result: *const MaptraxPlanResultHandle,
+    result: *const MaptraxPlanResult,
 ) -> MaptraxSwathBufferView {
     if result.is_null() {
         return MaptraxSwathBufferView {
@@ -759,7 +767,7 @@ pub extern "C" fn maptrax_plan_dubins(
     goal: MaptraxPose2,
     min_turning_radius: f64,
     step_size: f64,
-) -> *mut MaptraxPosePathHandle {
+) -> *mut MaptraxPosePath {
     let path = crate::Dubins::new(min_turning_radius).plan_path(
         Pose2D::new(start.x, start.y, start.yaw),
         Pose2D::new(goal.x, goal.y, goal.yaw),
@@ -774,7 +782,7 @@ pub extern "C" fn maptrax_plan_reeds_shepp(
     goal: MaptraxPose2,
     min_turning_radius: f64,
     step_size: f64,
-) -> *mut MaptraxPosePathHandle {
+) -> *mut MaptraxPosePath {
     let path = crate::ReedsShepp::new(min_turning_radius).plan_path(
         Pose2D::new(start.x, start.y, start.yaw),
         Pose2D::new(goal.x, goal.y, goal.yaw),
@@ -791,7 +799,7 @@ pub extern "C" fn maptrax_plan_sharp_turn(
     machine_length: f64,
     machine_width: f64,
     pattern: *const c_char,
-) -> *mut MaptraxPosePathHandle {
+) -> *mut MaptraxPosePath {
     let path = crate::Sharper::new(min_turning_radius, machine_length, machine_width)
         .plan_sharp_turn(
             Pose2D::new(start.x, start.y, start.yaw),
@@ -802,7 +810,7 @@ pub extern "C" fn maptrax_plan_sharp_turn(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn maptrax_pose_path_free(handle: *mut MaptraxPosePathHandle) {
+pub extern "C" fn maptrax_pose_path_free(handle: *mut MaptraxPosePath) {
     if handle.is_null() {
         return;
     }
@@ -813,9 +821,7 @@ pub extern "C" fn maptrax_pose_path_free(handle: *mut MaptraxPosePathHandle) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn maptrax_pose_path_view(
-    handle: *const MaptraxPosePathHandle,
-) -> MaptraxPoseBufferView {
+pub extern "C" fn maptrax_pose_path_view(handle: *const MaptraxPosePath) -> MaptraxPoseBufferView {
     if handle.is_null() {
         return MaptraxPoseBufferView {
             poses: ptr::null(),

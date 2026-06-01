@@ -2,10 +2,10 @@ use crate::Geo;
 
 use crate::core::{
     Aabb, MaptraxError, Point, Point2Ext, Polygon, Result, Segment, aabb_from_points, aabb_height,
-    aabb_width, next_id, point_distance, points_equal, polygon_aabb, polygon_area,
+    aabb_width, next_id, point_distance, point_xy, points_equal, polygon_aabb, polygon_area,
     polygon_ensure_ccw, polygon_from_points, polygon_is_axis_aligned_rectangle,
-    point_xy, polygon_open_vertices, polygon_shrink, remove_colinear_points, segment_end,
-    segment_length, segment_new, segment_start,
+    polygon_open_vertices, polygon_shrink, remove_colinear_points, segment_end, segment_length,
+    segment_new, segment_start,
 };
 
 #[derive(Debug, Clone, PartialEq)]

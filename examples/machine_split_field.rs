@@ -21,9 +21,9 @@
 mod rerun_viz;
 
 use maptrax::{
-    Balance, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode, Geo, Point,
-    FieldGenerationOptions, Maptrax, RoutingOptions, RoutingStrategy, Swath, TurnPlannerConfig,
-    TurnPlannerModel, point_xy, polygon_from_points, segment_length,
+    Balance, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode,
+    FieldGenerationOptions, Geo, Maptrax, Point, RoutingOptions, RoutingStrategy, Swath,
+    TurnPlannerConfig, TurnPlannerModel, point_xy, polygon_from_points, segment_length,
 };
 use rerun::Color;
 

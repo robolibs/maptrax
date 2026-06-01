@@ -1,19 +1,49 @@
 #ifndef MAPTRAX_H
 #define MAPTRAX_H
 
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+typedef enum {
+  MAPTRAX_ROUTING_STRATEGY_MAPTRAX_ROUTING_STRATEGY_GREEDY_NEAREST = 0,
+  MAPTRAX_ROUTING_STRATEGY_MAPTRAX_ROUTING_STRATEGY_SNAKE = 1,
+  MAPTRAX_ROUTING_STRATEGY_MAPTRAX_ROUTING_STRATEGY_SPIRAL = 2,
+} MaptraxRoutingStrategy;
 
-typedef struct MaptraxPlannerHandle MaptraxPlannerHandle;
-typedef struct MaptraxPlanResultHandle MaptraxPlanResultHandle;
-typedef struct MaptraxStagesResultHandle MaptraxStagesResultHandle;
-typedef struct MaptraxPartSnapshotHandle MaptraxPartSnapshotHandle;
-typedef struct MaptraxPosePathHandle MaptraxPosePathHandle;
+typedef enum {
+  MAPTRAX_TURN_MODEL_MAPTRAX_TURN_MODEL_AUTO = 0,
+  MAPTRAX_TURN_MODEL_MAPTRAX_TURN_MODEL_DUBINS = 1,
+  MAPTRAX_TURN_MODEL_MAPTRAX_TURN_MODEL_REEDS_SHEPP = 2,
+  MAPTRAX_TURN_MODEL_MAPTRAX_TURN_MODEL_SHARPER = 3,
+} MaptraxTurnModel;
+
+typedef enum {
+  MAPTRAX_CONNECTOR_MODE_MAPTRAX_CONNECTOR_MODE_AUTO = 0,
+  MAPTRAX_CONNECTOR_MODE_MAPTRAX_CONNECTOR_MODE_DIRECT = 1,
+  MAPTRAX_CONNECTOR_MODE_MAPTRAX_CONNECTOR_MODE_HEADLAND = 2,
+} MaptraxConnectorMode;
+
+typedef enum {
+  MAPTRAX_SWATH_KIND_MAPTRAX_SWATH_KIND_SWATH = 0,
+  MAPTRAX_SWATH_KIND_MAPTRAX_SWATH_KIND_CONNECTION = 1,
+  MAPTRAX_SWATH_KIND_MAPTRAX_SWATH_KIND_AROUND = 2,
+  MAPTRAX_SWATH_KIND_MAPTRAX_SWATH_KIND_HEADLAND = 3,
+} MaptraxSwathKind;
+
+typedef struct MaptraxPartSnapshot MaptraxPartSnapshot;
+
+typedef struct MaptraxPlanResult MaptraxPlanResult;
+
+typedef struct MaptraxPlanner MaptraxPlanner;
+
+typedef struct MaptraxPosePath MaptraxPosePath;
+
+typedef struct MaptraxStagesResult MaptraxStagesResult;
 
 typedef struct {
   double x;
@@ -26,35 +56,16 @@ typedef struct {
   double altitude;
 } MaptraxGeo3;
 
-typedef enum {
-  MAPTRAX_ROUTING_GREEDY_NEAREST = 0,
-  MAPTRAX_ROUTING_SNAKE = 1,
-  MAPTRAX_ROUTING_SPIRAL = 2,
-} MaptraxRoutingStrategy;
-
-typedef struct {
-  MaptraxRoutingStrategy strategy;
-  size_t local_improvement_passes;
-} MaptraxRoutingOptions;
-
-typedef enum {
-  MAPTRAX_TURN_AUTO = 0,
-  MAPTRAX_TURN_DUBINS = 1,
-  MAPTRAX_TURN_REEDS_SHEPP = 2,
-  MAPTRAX_TURN_SHARPER = 3,
-} MaptraxTurnModel;
-
-typedef enum {
-  MAPTRAX_CONNECTOR_AUTO = 0,
-  MAPTRAX_CONNECTOR_DIRECT = 1,
-  MAPTRAX_CONNECTOR_HEADLAND = 2,
-} MaptraxConnectorMode;
-
 typedef struct {
   double swath_width;
   double angle_degrees;
-  size_t headland_count;
+  uintptr_t headland_count;
 } MaptraxFieldOptions;
+
+typedef struct {
+  MaptraxRoutingStrategy strategy;
+  uintptr_t local_improvement_passes;
+} MaptraxRoutingOptions;
 
 typedef struct {
   MaptraxTurnModel model;
@@ -67,135 +78,126 @@ typedef struct {
 } MaptraxTurnOptions;
 
 typedef struct {
+  MaptraxSwathKind kind;
+  int32_t id;
+  double width;
+  uintptr_t point_offset;
+  uintptr_t point_len;
+} MaptraxSwathView;
+
+typedef struct {
+  const MaptraxSwathView *swaths;
+  uintptr_t swaths_len;
+  const MaptraxCoord2 *points;
+  uintptr_t points_len;
+} MaptraxSwathBufferView;
+
+typedef struct {
+  uintptr_t point_offset;
+  uintptr_t point_len;
+} MaptraxRingView;
+
+typedef struct {
+  const MaptraxRingView *rings;
+  uintptr_t rings_len;
+  const MaptraxCoord2 *points;
+  uintptr_t points_len;
+} MaptraxRingBufferView;
+
+typedef struct {
   double x;
   double y;
   double yaw;
 } MaptraxPose2;
 
-typedef enum {
-  MAPTRAX_SWATH = 0,
-  MAPTRAX_CONNECTION = 1,
-  MAPTRAX_AROUND = 2,
-  MAPTRAX_HEADLAND = 3,
-} MaptraxSwathKind;
-
 typedef struct {
-  MaptraxSwathKind kind;
-  int32_t id;
-  double width;
-  size_t point_offset;
-  size_t point_len;
-} MaptraxSwathView;
-
-typedef struct {
-  const MaptraxSwathView* swaths;
-  size_t swaths_len;
-  const MaptraxCoord2* points;
-  size_t points_len;
-} MaptraxSwathBufferView;
-
-typedef struct {
-  size_t point_offset;
-  size_t point_len;
-} MaptraxRingView;
-
-typedef struct {
-  const MaptraxRingView* rings;
-  size_t rings_len;
-  const MaptraxCoord2* points;
-  size_t points_len;
-} MaptraxRingBufferView;
-
-typedef struct {
-  const MaptraxPose2* poses;
-  size_t poses_len;
+  const MaptraxPose2 *poses;
+  uintptr_t poses_len;
   double total_length;
-  const char* name;
+  const char *name;
 } MaptraxPoseBufferView;
 
-const char* maptrax_last_error_message(void);
+#ifdef __cplusplus
+extern "C" {
+#endif // __cplusplus
 
-MaptraxPlannerHandle* maptrax_planner_new(void);
-void maptrax_planner_free(MaptraxPlannerHandle* planner);
+const char *maptrax_last_error_message(void);
 
-bool maptrax_planner_set_field(
-    MaptraxPlannerHandle* planner,
-    const MaptraxCoord2* coords,
-    size_t coords_len,
-    MaptraxGeo3 datum);
+MaptraxPlanner *maptrax_planner_new(void);
 
-bool maptrax_planner_generate_field(
-    MaptraxPlannerHandle* planner,
-    MaptraxFieldOptions options);
+void maptrax_planner_free(MaptraxPlanner *planner);
 
-size_t maptrax_planner_part_count(const MaptraxPlannerHandle* planner);
-double maptrax_planner_total_area(const MaptraxPlannerHandle* planner);
+bool maptrax_planner_set_field(MaptraxPlanner *planner,
+                               const MaptraxCoord2 *coords,
+                               uintptr_t coords_len,
+                               MaptraxGeo3 datum);
 
-MaptraxPartSnapshotHandle* maptrax_planner_part_snapshot(
-    const MaptraxPlannerHandle* planner,
-    size_t part_index);
+bool maptrax_planner_generate_field(MaptraxPlanner *planner, MaptraxFieldOptions options);
 
-void maptrax_part_snapshot_free(MaptraxPartSnapshotHandle* snapshot);
-MaptraxRingBufferView maptrax_part_snapshot_boundary_view(
-    const MaptraxPartSnapshotHandle* snapshot);
-MaptraxRingBufferView maptrax_part_snapshot_headlands_view(
-    const MaptraxPartSnapshotHandle* snapshot);
-MaptraxSwathBufferView maptrax_part_snapshot_swaths_view(
-    const MaptraxPartSnapshotHandle* snapshot);
+uintptr_t maptrax_planner_part_count(const MaptraxPlanner *planner);
 
-MaptraxPlanResultHandle* maptrax_planner_plan_part(
-    const MaptraxPlannerHandle* planner,
-    size_t part_index,
-    MaptraxRoutingOptions routing,
-    MaptraxTurnOptions turn);
+double maptrax_planner_total_area(const MaptraxPlanner *planner);
 
-MaptraxStagesResultHandle* maptrax_planner_plan_stages_part(
-    const MaptraxPlannerHandle* planner,
-    size_t part_index,
-    MaptraxRoutingOptions routing,
-    MaptraxTurnOptions turn);
+MaptraxPartSnapshot *maptrax_planner_part_snapshot(const MaptraxPlanner *planner,
+                                                   uintptr_t part_index);
 
-void maptrax_plan_result_free(MaptraxPlanResultHandle* result);
-MaptraxSwathBufferView maptrax_plan_result_ordered_view(
-    const MaptraxPlanResultHandle* result);
-MaptraxSwathBufferView maptrax_plan_result_tour_view(
-    const MaptraxPlanResultHandle* result);
+MaptraxPlanResult *maptrax_planner_plan_part(const MaptraxPlanner *planner,
+                                             uintptr_t part_index,
+                                             MaptraxRoutingOptions routing,
+                                             MaptraxTurnOptions turn);
 
-void maptrax_stages_result_free(MaptraxStagesResultHandle* result);
-MaptraxRingBufferView maptrax_stages_result_headlands_view(
-    const MaptraxStagesResultHandle* result);
-MaptraxSwathBufferView maptrax_stages_result_generated_view(
-    const MaptraxStagesResultHandle* result);
-MaptraxSwathBufferView maptrax_stages_result_ordered_view(
-    const MaptraxStagesResultHandle* result);
-MaptraxSwathBufferView maptrax_stages_result_tour_view(
-    const MaptraxStagesResultHandle* result);
+MaptraxStagesResult *maptrax_planner_plan_stages_part(const MaptraxPlanner *planner,
+                                                      uintptr_t part_index,
+                                                      MaptraxRoutingOptions routing,
+                                                      MaptraxTurnOptions turn);
 
-MaptraxPosePathHandle* maptrax_plan_dubins(
-    MaptraxPose2 start,
-    MaptraxPose2 goal,
-    double min_turning_radius,
-    double step_size);
+void maptrax_plan_result_free(MaptraxPlanResult *result);
 
-MaptraxPosePathHandle* maptrax_plan_reeds_shepp(
-    MaptraxPose2 start,
-    MaptraxPose2 goal,
-    double min_turning_radius,
-    double step_size);
+void maptrax_stages_result_free(MaptraxStagesResult *result);
 
-MaptraxPosePathHandle* maptrax_plan_sharp_turn(
-    MaptraxPose2 start,
-    MaptraxPose2 goal,
-    double min_turning_radius,
-    double machine_length,
-    double machine_width,
-    const char* pattern);
+void maptrax_part_snapshot_free(MaptraxPartSnapshot *snapshot);
 
-void maptrax_pose_path_free(MaptraxPosePathHandle* handle);
-MaptraxPoseBufferView maptrax_pose_path_view(const MaptraxPosePathHandle* handle);
+MaptraxSwathBufferView maptrax_plan_result_ordered_view(const MaptraxPlanResult *result);
+
+MaptraxRingBufferView maptrax_stages_result_headlands_view(const MaptraxStagesResult *result);
+
+MaptraxRingBufferView maptrax_part_snapshot_boundary_view(const MaptraxPartSnapshot *snapshot);
+
+MaptraxRingBufferView maptrax_part_snapshot_headlands_view(const MaptraxPartSnapshot *snapshot);
+
+MaptraxSwathBufferView maptrax_part_snapshot_swaths_view(const MaptraxPartSnapshot *snapshot);
+
+MaptraxSwathBufferView maptrax_stages_result_generated_view(const MaptraxStagesResult *result);
+
+MaptraxSwathBufferView maptrax_stages_result_ordered_view(const MaptraxStagesResult *result);
+
+MaptraxSwathBufferView maptrax_stages_result_tour_view(const MaptraxStagesResult *result);
+
+MaptraxSwathBufferView maptrax_plan_result_tour_view(const MaptraxPlanResult *result);
+
+MaptraxPosePath *maptrax_plan_dubins(MaptraxPose2 start,
+                                     MaptraxPose2 goal,
+                                     double min_turning_radius,
+                                     double step_size);
+
+MaptraxPosePath *maptrax_plan_reeds_shepp(MaptraxPose2 start,
+                                          MaptraxPose2 goal,
+                                          double min_turning_radius,
+                                          double step_size);
+
+MaptraxPosePath *maptrax_plan_sharp_turn(MaptraxPose2 start,
+                                         MaptraxPose2 goal,
+                                         double min_turning_radius,
+                                         double machine_length,
+                                         double machine_width,
+                                         const char *pattern);
+
+void maptrax_pose_path_free(MaptraxPosePath *handle);
+
+MaptraxPoseBufferView maptrax_pose_path_view(const MaptraxPosePath *handle);
 
 #ifdef __cplusplus
-}
-#endif
+}  // extern "C"
+#endif  // __cplusplus
 
-#endif
+#endif  /* MAPTRAX_H */

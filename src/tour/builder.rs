@@ -241,7 +241,6 @@ fn innermost_headland_ring(part: &Part) -> Option<&Polygon> {
 #[derive(Clone)]
 struct ConnectorPlan {
     segments: Vec<Swath>,
-    cost: f64,
 }
 
 fn connect_between_swaths(
@@ -251,9 +250,6 @@ fn connect_between_swaths(
     work_area: Option<&Polygon>,
     cfg: &TurnPlannerConfig,
 ) -> Vec<Swath> {
-    let from_end = from.tail();
-    let to_start = to.head();
-
     let headland = headland_connection_plan(from, to, field_ring, work_area, cfg);
 
     match cfg.connector_mode {
@@ -298,7 +294,6 @@ fn direct_connection_plan(
         cfg,
     )
     .map(|swath| ConnectorPlan {
-        cost: polyline_length(&swath.points),
         segments: vec![swath],
     })
 }
@@ -368,10 +363,7 @@ fn headland_connection_plan(
         }
     }
 
-    Some(ConnectorPlan {
-        cost: out.iter().map(|swath| polyline_length(&swath.points)).sum(),
-        segments: out,
-    })
+    Some(ConnectorPlan { segments: out })
 }
 
 fn direct_connection_swath_points(

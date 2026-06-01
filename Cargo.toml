@@ -18,7 +18,10 @@ python = ["dep:pyo3"]
 datapod = { git = "https://codeberg.org/robolibs/datapod.git", tag = "0.2.0" }
 concord = { git = "https://codeberg.org/robolibs/concord.git", tag = "0.1.0" }
 graphix = { git = "https://codeberg.org/robolibs/graphix.git", tag = "0.1.0" }
-pyo3 = { version = "0.23", optional = true, features = ["abi3-py39", "auto-initialize", "extension-module"] }
+pyo3 = { version = "0.23", optional = true, features = [
+    "abi3-py39",
+    "extension-module",
+] }
 
 [dev-dependencies]
 rerun = { version = "0.31.2", default-features = false, features = ["sdk", "server"] }

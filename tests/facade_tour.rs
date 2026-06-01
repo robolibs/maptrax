@@ -1,11 +1,11 @@
 use concord::Geo;
-use maptrax::{Point, Point2Ext, Polygon, point_xy};
 use maptrax::{
     Balance, ConnectorMode, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode,
     FieldGenerationOptions, Maptrax, Nety, Part, PlannerOptions, RoutingOptions, RoutingStrategy,
     SwathAngleSearchOptions, SwathObjective, SwathType, TourBuilder, TurnPlannerConfig,
     TurnPlannerModel, create_ring, create_swath, polygon_from_points,
 };
+use maptrax::{Point2Ext, Polygon, point_xy};
 
 fn test_polygon() -> Polygon {
     polygon_from_points(vec![

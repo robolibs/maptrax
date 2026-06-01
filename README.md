@@ -2,12 +2,12 @@
 
 `maptrax` is the Rust port of `farmtrax`.
 
-The public spatial interface now uses [`geo`](https://github.com/georust/geo):
+The public spatial interface now uses the sibling `datapod` geometry types:
 
-- `geo::Point<f64>`
-- `geo::Line<f64>`
-- `geo::Polygon<f64>`
-- `geo::Rect<f64>`
+- `datapod::Point`
+- `datapod::Segment`
+- `datapod::Polygon`
+- `datapod::Aabb`
 
 Current scope:
 
@@ -30,21 +30,22 @@ Planner stages exposed by the facade:
 
 Sibling local dependencies:
 
-- `../graphix_rs`
-- `../concord_rs`
+- `../graphix`
+- `../concord`
+- `../datapod`
 
 ## Install
 
 ```toml
 [dependencies]
-maptrax = { path = "../maptrax_rs" }
+maptrax = { path = "../maptrax" }
 ```
 
 ## Example
 
 ```rust
 use concord::Geo;
-use geo::Point;
+use datapod::Point;
 use maptrax::{Field, polygon_from_points};
 
 let field_polygon = polygon_from_points(vec![
@@ -82,10 +83,10 @@ Runnable workflows live in [`examples/`](examples):
 
 C ABI surface:
 
-- header: [`include/maptrax.h`](/home/bresilla/data/code/robolibs/maptrax_rs/include/maptrax.h)
-- Rust implementation: [`src/ffi.rs`](/home/bresilla/data/code/robolibs/maptrax_rs/src/ffi.rs)
-- example: [`examples/c_abi/demo.c`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/c_abi/demo.c)
-- local makefile: [`examples/c_abi/Makefile`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/c_abi/Makefile)
+- header: [`include/maptrax.h`](include/maptrax.h)
+- Rust implementation: [`src/ffi.rs`](src/ffi.rs)
+- example: [`examples/c_abi/demo.c`](examples/c_abi/demo.c)
+- local makefile: [`examples/c_abi/Makefile`](examples/c_abi/Makefile)
 
 Build and run the C example:
 
@@ -97,10 +98,10 @@ make
 
 Python surface:
 
-- Python module implementation: [`src/python.rs`](/home/bresilla/data/code/robolibs/maptrax_rs/src/python.rs)
-- packaging config: [`pyproject.toml`](/home/bresilla/data/code/robolibs/maptrax_rs/pyproject.toml)
-- examples: [`examples/python_binding/basic.py`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/basic.py), [`examples/python_binding/turners.py`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/turners.py), [`examples/python_binding/rerun_demo.py`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/rerun_demo.py), [`examples/python_binding/main.py`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/main.py)
-- local makefile: [`examples/python_binding/Makefile`](/home/bresilla/data/code/robolibs/maptrax_rs/examples/python_binding/Makefile)
+- Python module implementation: [`src/python/`](src/python)
+- packaging config: [`pyproject.toml`](pyproject.toml)
+- examples: [`examples/python_binding/basic.py`](examples/python_binding/basic.py), [`examples/python_binding/turners.py`](examples/python_binding/turners.py), [`examples/python_binding/main.py`](examples/python_binding/main.py)
+- local makefile: [`examples/python_binding/Makefile`](examples/python_binding/Makefile)
 
 Build and install the Python module with `maturin`:
 
@@ -121,7 +122,7 @@ Use `Maptrax::plan_stages(...)` when you want explicit outputs from each planner
 
 ```rust
 use concord::Geo;
-use geo::Point;
+use datapod::Point;
 use maptrax::{
     FieldGenerationMode, FieldGenerationOptions, Maptrax, PlannerOptions, polygon_from_points,
 };

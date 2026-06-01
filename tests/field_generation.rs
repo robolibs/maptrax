@@ -1,10 +1,10 @@
 use concord::{Geo, Wgs, to_enu};
-use maptrax::{Point, Point2Ext, Polygon, point_xy};
 use maptrax::{
     DecompositionMode, Field, SwathAngleSearchOptions, SwathObjective,
     generate_headlands_for_polygon, generate_swaths_for_polygon, polygon_area, polygon_from_points,
     segment_length,
 };
+use maptrax::{Point2Ext, Polygon, point_xy};
 
 fn test_polygon() -> Polygon {
     polygon_from_points(vec![

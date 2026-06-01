@@ -1,8 +1,7 @@
 use maptrax::{
     angle_between, angle_difference, are_colinear, float_to_byte, float_to_byte_in_range,
     heading_between, normalize_angle, point_to_line_distance, point_xy, polygon_exterior_points,
-    polygon_from_points,
-    remove_colinear_points,
+    polygon_from_points, remove_colinear_points,
 };
 
 #[test]
@@ -25,11 +24,8 @@ fn geometry_helpers_match_expected_values() {
     assert!(are_colinear(p1, p2, p3, 1e-10));
     assert!(!are_colinear(p1, p2, p4, 1e-10));
 
-    let distance = point_to_line_distance(
-        point_xy(0.0, 5.0),
-        point_xy(1.0, 0.0),
-        point_xy(1.0, 10.0),
-    );
+    let distance =
+        point_to_line_distance(point_xy(0.0, 5.0), point_xy(1.0, 0.0), point_xy(1.0, 10.0));
     assert!((distance - 1.0).abs() < 1e-9);
 
     let angle = angle_between(point_xy(1.0, 0.0), point_xy(0.0, 1.0));

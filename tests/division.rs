@@ -1,9 +1,9 @@
 use concord::{Geo, Wgs, to_enu};
-use maptrax::{Point, Point2Ext, point_xy, polygon_exterior_points};
 use maptrax::{
     Balance, DivisionPattern, DivisionPlan, Divy, Field, MachineProfile, OptimizeObjective,
     polygon_from_points, segment_length,
 };
+use maptrax::{Point, Point2Ext, point_xy, polygon_exterior_points};
 
 fn rect_field(swath_width: f64) -> Field {
     let polygon = polygon_from_points(vec![

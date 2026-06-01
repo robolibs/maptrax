@@ -38,9 +38,7 @@ fn py_err(err: mt::MaptraxError) -> PyErr {
 
 fn polygon_from_xy(points: Vec<(f64, f64)>) -> PyResult<mt::Polygon> {
     if points.len() < 3 {
-        return Err(PyValueError::new_err(
-            "polygon requires at least 3 points",
-        ));
+        return Err(PyValueError::new_err("polygon requires at least 3 points"));
     }
     Ok(mt::polygon_from_points(
         points
@@ -75,12 +73,7 @@ impl PyDubins {
     }
 
     #[pyo3(signature = (start, goal, step_size = 0.2))]
-    fn plan(
-        &self,
-        start: (f64, f64, f64),
-        goal: (f64, f64, f64),
-        step_size: f64,
-    ) -> PyDubinsPath {
+    fn plan(&self, start: (f64, f64, f64), goal: (f64, f64, f64), step_size: f64) -> PyDubinsPath {
         PyDubinsPath {
             inner: self.inner.plan_path(pose(start), pose(goal), step_size),
         }
@@ -247,10 +240,7 @@ impl PyNety {
         options: Option<PyRoutingOptions>,
         start: Option<(f64, f64)>,
     ) -> Vec<PySwath> {
-        let opts: mt::RoutingOptions = options
-            .as_ref()
-            .map(Into::into)
-            .unwrap_or_default();
+        let opts: mt::RoutingOptions = options.as_ref().map(Into::into).unwrap_or_default();
         let start = start.map(|(x, y)| point_xy(x, y));
         self.inner.field_traversal_with_options(start, opts);
         self.swaths()
@@ -386,7 +376,9 @@ impl PyField {
     fn get_boundary(&self) -> PyRing {
         // The first part's boundary is the field boundary ring with uuid + bbox.
         let part = &self.inner.parts()[0];
-        PyRing { inner: part.boundary.clone() }
+        PyRing {
+            inner: part.boundary.clone(),
+        }
     }
 
     #[pyo3(signature = (mode))]

@@ -1,5 +1,5 @@
-use maptrax::{Point, Point2Ext, point_xy};
 use maptrax::{ABLine, Nety, RoutingOptions, RoutingStrategy, Swath, SwathType, create_swath};
+use maptrax::{Point, Point2Ext, point_xy};
 
 fn test_swaths() -> Vec<Swath> {
     (0..5)

@@ -137,15 +137,6 @@ fn parse_headland_mode(name: &str, dedicated_machine: usize) -> PyResult<Headlan
     }
 }
 
-fn polygon_from_xy(points: Vec<(f64, f64)>) -> crate::Result<crate::Polygon> {
-    Ok(polygon_from_points(
-        points
-            .into_iter()
-            .map(|(x, y)| point_xy(x, y))
-            .collect::<Vec<_>>(),
-    ))
-}
-
 fn swath_to_dict<'py>(py: Python<'py>, swath: &crate::Swath) -> PyResult<Bound<'py, PyDict>> {
     let dict = PyDict::new(py);
     dict.set_item("type", format!("{:?}", swath.r#type).to_lowercase())?;

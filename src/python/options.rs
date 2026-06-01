@@ -56,7 +56,10 @@ impl PyMachineProfile {
     }
 
     pub(crate) fn __repr__(&self) -> String {
-        format!("MachineProfile(weight={}, speed={})", self.weight, self.speed)
+        format!(
+            "MachineProfile(weight={}, speed={})",
+            self.weight, self.speed
+        )
     }
 }
 
@@ -300,7 +303,9 @@ impl From<mt::FieldGenerationOptions> for PyFieldGenerationOptions {
         Self {
             swath_width: r.swath_width,
             headland_count: r.headland_count,
-            decomposition: PyDecompositionMode { inner: r.decomposition },
+            decomposition: PyDecompositionMode {
+                inner: r.decomposition,
+            },
             mode: PyFieldGenerationMode { inner: r.mode },
         }
     }

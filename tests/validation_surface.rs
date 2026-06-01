@@ -1,11 +1,11 @@
 use concord::{Geo, Wgs, to_enu};
-use maptrax::{Point, Point2Ext, Polygon, point_xy};
 use maptrax::{
     Balance, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode,
     FieldGenerationOptions, MachinePlanningOptions, Maptrax, OptimizeObjective, PlannerOptions,
     RoutingOptions, RoutingStrategy, Swath, SwathType, TurnPlannerConfig, point_distance,
     polygon_from_points,
 };
+use maptrax::{Point2Ext, Polygon, point_xy};
 
 fn rectangle_polygon() -> Polygon {
     polygon_from_points(vec![
