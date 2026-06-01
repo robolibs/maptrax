@@ -65,8 +65,7 @@ impl Swath {
 
 /// Describes a synthetic split line that runs along one side of a Part's
 /// boundary. Used by `AutoSplit` decomposition to record where a Part was
-/// cut off from its neighbour; non-owning Parts skip the headland inset
-/// along this edge so the neighbour's midline headland is shared.
+/// cut off from its neighbour.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SplitBoundary {
     /// Split line runs vertically at the given x.
@@ -80,11 +79,10 @@ pub struct Part {
     pub boundary: Ring,
     pub swaths: Vec<Swath>,
     pub headlands: Vec<Ring>,
-    /// Split boundaries bordering this Part where the midline headland is
-    /// owned by the NEIGHBOUR (not this Part). When generating headlands
-    /// and the swath interior, this Part does NOT inset along these
-    /// boundaries — swaths extend all the way to the split line so the
-    /// machine can turn using the neighbour's headland.
+    /// Split boundaries bordering this Part where the neighbour owns the
+    /// adjacent midline turn band. Headland generation keeps the outermost
+    /// ring on this shared line, then offsets deeper rings normally so there
+    /// is no empty seam and no multi-ring collapse.
     pub non_owned_splits: Vec<SplitBoundary>,
 }
 
@@ -428,10 +426,11 @@ pub fn generate_headlands_for_polygon(
     rings
 }
 
-/// Like `generate_headlands_for_polygon` but for each inset ring, vertices
-/// that sit near a non-owned split line are snapped back onto the split.
-/// Result: along the split edge the ring has zero inset (the adjacent Part
-/// owns the midline headland and swaths here extend to the split line).
+/// Like `generate_headlands_for_polygon`, while preserving AutoSplit shared
+/// edge metadata. The outermost headland on a non-owned shared edge is kept
+/// on the split line so there is no empty seam between sub-fields; deeper
+/// rings remain offset by one swath width each so multiple requested headlands
+/// do not collapse onto the same line.
 fn generate_headlands_with_non_owned_splits(
     border: &Polygon,
     swath_width: f64,
@@ -445,8 +444,7 @@ fn generate_headlands_with_non_owned_splits(
             break;
         };
         if !non_owned.is_empty() {
-            let inset_distance = (i + 1) as f64 * swath_width;
-            inset = snap_inset_vertices_to_splits(&inset, non_owned, inset_distance);
+            inset = snap_non_owned_headland_to_shared_lanes(&inset, non_owned, swath_width, i);
         }
         let Ok(ring) = create_ring(inset.clone(), format!("headland_{}", i + 1)) else {
             break;
@@ -457,31 +455,31 @@ fn generate_headlands_with_non_owned_splits(
     rings
 }
 
-/// For each vertex of `inset_polygon`, if it is within ~`inset_distance`
-/// (plus a small tolerance) of a non-owned split line, snap that vertex
-/// onto the split. This widens the inset polygon so it touches the split
-/// line directly — no gap, neighbour's headland is shared.
-fn snap_inset_vertices_to_splits(
+fn snap_non_owned_headland_to_shared_lanes(
     inset_polygon: &Polygon,
     non_owned: &[SplitBoundary],
-    inset_distance: f64,
+    swath_width: f64,
+    ring_index: usize,
 ) -> Polygon {
     let vertices = polygon_open_vertices(inset_polygon);
-    let threshold = inset_distance * 1.2 + 1e-6;
-    let snapped: Vec<Point> = vertices
+    let offset = ring_index as f64 * swath_width;
+    let threshold = swath_width.abs() * 1.2 + 1e-6;
+    let snapped = vertices
         .into_iter()
         .map(|point| {
             let mut pt = point;
             for boundary in non_owned {
                 match *boundary {
                     SplitBoundary::Vertical { x } => {
-                        if (pt.x() - x).abs() < threshold {
-                            pt = point_xy(x, pt.y());
+                        let target_x = x + offset;
+                        if (pt.x() - target_x).abs() <= threshold {
+                            pt = point_xy(target_x, pt.y());
                         }
                     }
                     SplitBoundary::Horizontal { y } => {
-                        if (pt.y() - y).abs() < threshold {
-                            pt = point_xy(pt.x(), y);
+                        let target_y = y + offset;
+                        if (pt.y() - target_y).abs() <= threshold {
+                            pt = point_xy(pt.x(), target_y);
                         }
                     }
                 }
@@ -894,9 +892,9 @@ fn decompose_polygon_into_parts(border: &Polygon, mode: DecompositionMode) -> Re
             }
         }
         DecompositionMode::AutoSplit { max_side } => {
-            // Recurse with split-ownership tracking: each time we bisect,
-            // the "lower" half (smaller coordinate along the split axis)
-            // owns the midline, the "upper" half doesn't.
+            // Recurse with split-edge tracking. The larger-coordinate half
+            // records a non-owned/shared split edge; its outermost headland
+            // ring stays on the split line and deeper rings stay distinct.
             let entries = auto_split_polygons_tracked(&border, max_side, Vec::new());
             entries
                 .into_iter()
@@ -916,9 +914,8 @@ fn decompose_polygon_into_parts(border: &Polygon, mode: DecompositionMode) -> Re
 
 /// Recursively bisect `border` perpendicular to its longer AABB side until
 /// every resulting polygon's longer side is <= `max_side`. Tracks per-
-/// resulting-polygon split ownership: the half with the smaller coordinate
-/// along the split axis OWNS the midline headland; the larger-coordinate
-/// half records the axis as non-owned (swaths reach the split directly).
+/// resulting-polygon split metadata: the larger-coordinate half records
+/// the axis as a non-owned/internal shared edge.
 fn auto_split_polygons_tracked(
     border: &Polygon,
     max_side: f64,
@@ -947,7 +944,7 @@ fn auto_split_polygons_tracked(
     }
 
     // Sort halves by their centroid along the split axis so the "lower"
-    // (smaller-coord) half comes first. That one owns the midline.
+    // (smaller-coordinate) half comes first.
     let mut halves_sorted: Vec<Polygon> = halves;
     halves_sorted.sort_by(|a, b| {
         let (ac, bc) = (polygon_centroid(a), polygon_centroid(b));
@@ -972,7 +969,7 @@ fn auto_split_polygons_tracked(
     for (index, half) in halves_sorted.into_iter().enumerate() {
         let mut non_owned = inherited_non_owned.clone();
         if index > 0 {
-            // Upper half: doesn't own this midline.
+            // Upper half: record this internal/shared edge.
             non_owned.push(split_boundary);
         }
         out.extend(auto_split_polygons_tracked(&half, max_side, non_owned));

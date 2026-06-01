@@ -1,8 +1,8 @@
 use concord::{Geo, Wgs, to_enu};
 use maptrax::{
-    DecompositionMode, Field, SwathAngleSearchOptions, SwathObjective,
-    generate_headlands_for_polygon, generate_swaths_for_polygon, polygon_area, polygon_from_points,
-    segment_length,
+    DecompositionMode, Field, SplitBoundary, SwathAngleSearchOptions, SwathObjective,
+    generate_headlands_for_polygon, generate_swaths_for_polygon, polygon_area,
+    polygon_exterior_points, polygon_from_points, segment_length,
 };
 use maptrax::{Point2Ext, Polygon, point_xy};
 
@@ -107,6 +107,56 @@ fn headland_generation_can_be_run_as_a_separate_stage() {
     let part = &field.get_parts()[0];
     assert!(!part.swaths.is_empty());
     assert!(part.swaths.iter().all(|swath| swath.width == 10.0));
+}
+
+#[test]
+fn autosplit_headlands_stay_distinct_on_shared_edges() {
+    let datum = Geo::new(51.0, 5.0, 0.0);
+    let mut field = Field::new(test_polygon(), datum).expect("field");
+    field
+        .decompose(DecompositionMode::AutoSplit { max_side: 60.0 })
+        .expect("decomposed");
+    field.generate_headlands(5.0, 2).expect("headlands");
+
+    assert_eq!(field.get_parts().len(), 2);
+    for part in field.get_parts() {
+        assert_eq!(part.headlands.len(), 2);
+        let boundary_vertices = polygon_exterior_points(&part.boundary.polygon);
+        let centroid_x = boundary_vertices.iter().map(|p| p.x()).sum::<f64>()
+            / boundary_vertices.len() as f64;
+
+        let shared_side_x = |ring_index: usize| {
+            let xs = polygon_exterior_points(&part.headlands[ring_index].polygon)
+                .into_iter()
+                .map(|p| p.x());
+            if centroid_x < 50.0 {
+                xs.fold(f64::NEG_INFINITY, f64::max)
+            } else {
+                xs.fold(f64::INFINITY, f64::min)
+            }
+        };
+
+        let outer_shared_x = shared_side_x(0);
+        let inner_shared_x = shared_side_x(1);
+        assert!(
+            (outer_shared_x - inner_shared_x).abs() > 4.0,
+            "shared-edge headland rings collapsed onto one line: outer={outer_shared_x}, inner={inner_shared_x}"
+        );
+
+        if part
+            .non_owned_splits
+            .contains(&SplitBoundary::Vertical { x: 50.0 })
+        {
+            assert!(
+                (outer_shared_x - 50.0).abs() < 1e-6,
+                "non-owned outer headland should cover the split seam: outer={outer_shared_x}"
+            );
+            assert!(
+                (inner_shared_x - 55.0).abs() < 1e-6,
+                "non-owned inner headland should be one swath width off the seam: inner={inner_shared_x}"
+            );
+        }
+    }
 }
 
 #[test]
