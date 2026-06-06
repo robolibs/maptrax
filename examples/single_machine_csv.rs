@@ -9,6 +9,8 @@
 //! Run with:
 //!   cargo run --example single_machine_csv
 
+#![allow(clippy::cloned_ref_to_slice_refs)]
+
 #[path = "support/rerun_viz.rs"]
 mod rerun_viz;
 
@@ -250,9 +252,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// and non-RS connectors have `point_reverse` empty (== all forward);
 /// RS connectors have one bool per waypoint telling whether the machine
 /// is reversing at that point.
-fn split_forward_reverse_by_segment(
-    tour: &[maptrax::Swath],
-) -> (Vec<Vec<Point>>, Vec<Vec<Point>>) {
+fn split_forward_reverse_by_segment(tour: &[maptrax::Swath]) -> (Vec<Vec<Point>>, Vec<Vec<Point>>) {
     use maptrax::SwathType;
 
     let mut forward_runs: Vec<Vec<Point>> = Vec::new();

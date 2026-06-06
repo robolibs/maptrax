@@ -284,8 +284,8 @@ pub fn polygon_intersection(subject: &Polygon, clipper: &Polygon) -> Option<Poly
 fn point_is_inside_edge(point: Point, edge_a: Point, edge_b: Point) -> bool {
     // CCW polygon: a point is inside (to the left of) edge (a -> b) when the
     // cross product is non-negative.
-    let cross = (edge_b.x - edge_a.x) * (point.y - edge_a.y)
-        - (edge_b.y - edge_a.y) * (point.x - edge_a.x);
+    let cross =
+        (edge_b.x - edge_a.x) * (point.y - edge_a.y) - (edge_b.y - edge_a.y) * (point.x - edge_a.x);
     cross >= -1e-9
 }
 

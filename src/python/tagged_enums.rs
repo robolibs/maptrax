@@ -35,23 +35,31 @@ pub struct PyDecompositionMode {
 impl PyDecompositionMode {
     #[staticmethod]
     fn none() -> Self {
-        Self { inner: mt::DecompositionMode::None }
+        Self {
+            inner: mt::DecompositionMode::None,
+        }
     }
 
     #[staticmethod]
     fn simple_split() -> Self {
-        Self { inner: mt::DecompositionMode::SimpleSplit }
+        Self {
+            inner: mt::DecompositionMode::SimpleSplit,
+        }
     }
 
     #[staticmethod]
     fn concave_split() -> Self {
-        Self { inner: mt::DecompositionMode::ConcaveSplit }
+        Self {
+            inner: mt::DecompositionMode::ConcaveSplit,
+        }
     }
 
     #[staticmethod]
     #[pyo3(signature = (max_side))]
     fn auto_split(max_side: f64) -> Self {
-        Self { inner: mt::DecompositionMode::AutoSplit { max_side } }
+        Self {
+            inner: mt::DecompositionMode::AutoSplit { max_side },
+        }
     }
 
     #[getter]
@@ -110,23 +118,33 @@ pub struct PyHeadlandMode {
 impl PyHeadlandMode {
     #[staticmethod]
     fn one_per_machine() -> Self {
-        Self { inner: mt::HeadlandMode::OnePerMachine }
+        Self {
+            inner: mt::HeadlandMode::OnePerMachine,
+        }
     }
 
     #[staticmethod]
     #[pyo3(signature = (machine_index = 0))]
     fn dedicated(machine_index: usize) -> Self {
-        Self { inner: mt::HeadlandMode::Dedicated { machine: machine_index } }
+        Self {
+            inner: mt::HeadlandMode::Dedicated {
+                machine: machine_index,
+            },
+        }
     }
 
     #[staticmethod]
     fn split_by_zone() -> Self {
-        Self { inner: mt::HeadlandMode::SplitByZone }
+        Self {
+            inner: mt::HeadlandMode::SplitByZone,
+        }
     }
 
     #[staticmethod]
     fn none() -> Self {
-        Self { inner: mt::HeadlandMode::None }
+        Self {
+            inner: mt::HeadlandMode::None,
+        }
     }
 
     #[getter]
@@ -185,28 +203,38 @@ pub struct PySwathObjective {
 impl PySwathObjective {
     #[staticmethod]
     fn approx_min_count() -> Self {
-        Self { inner: mt::SwathObjective::ApproxMinSwathCount }
+        Self {
+            inner: mt::SwathObjective::ApproxMinSwathCount,
+        }
     }
 
     #[staticmethod]
     #[pyo3(signature = (n))]
     fn exact_count(n: usize) -> Self {
-        Self { inner: mt::SwathObjective::ExactSwathCount(n) }
+        Self {
+            inner: mt::SwathObjective::ExactSwathCount(n),
+        }
     }
 
     #[staticmethod]
     fn total_length() -> Self {
-        Self { inner: mt::SwathObjective::TotalSwathLength }
+        Self {
+            inner: mt::SwathObjective::TotalSwathLength,
+        }
     }
 
     #[staticmethod]
     fn overlap_penalty() -> Self {
-        Self { inner: mt::SwathObjective::OverlapPenalty }
+        Self {
+            inner: mt::SwathObjective::OverlapPenalty,
+        }
     }
 
     #[staticmethod]
     fn coverage_score() -> Self {
-        Self { inner: mt::SwathObjective::CoverageScore }
+        Self {
+            inner: mt::SwathObjective::CoverageScore,
+        }
     }
 
     #[getter]
@@ -267,12 +295,16 @@ pub struct PyOptimizeObjective {
 impl PyOptimizeObjective {
     #[staticmethod]
     fn makespan() -> Self {
-        Self { inner: mt::OptimizeObjective::Makespan }
+        Self {
+            inner: mt::OptimizeObjective::Makespan,
+        }
     }
 
     #[staticmethod]
     fn total_transit() -> Self {
-        Self { inner: mt::OptimizeObjective::TotalTransit }
+        Self {
+            inner: mt::OptimizeObjective::TotalTransit,
+        }
     }
 
     #[staticmethod]
@@ -355,7 +387,9 @@ impl PyDivisionPattern {
 
     #[staticmethod]
     fn block() -> Self {
-        Self { inner: mt::DivisionPattern::Block }
+        Self {
+            inner: mt::DivisionPattern::Block,
+        }
     }
 
     #[staticmethod]

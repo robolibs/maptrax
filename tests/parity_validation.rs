@@ -1,9 +1,9 @@
 use concord::{Geo, Wgs, to_enu};
-use maptrax::{Point, Point2Ext, Polygon, point_xy};
 use maptrax::{
     Balance, DivisionPattern, DivisionPlan, Divy, Dubins, Field, Maptrax, Nety, Pose2D, ReedsShepp,
     Sharper, SwathType, TourBuilder, TurnPlannerConfig, polygon_from_points,
 };
+use maptrax::{Polygon, point_xy};
 
 fn stripe_plan(machines: usize) -> DivisionPlan {
     DivisionPlan::uniform(

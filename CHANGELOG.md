@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1] - 2026-06-06
+
+### <!-- 0 -->⛰️  Features
+
+- Improve AutoSplit shared edge headland generation
+- Refactor FFI types and add `cbindgen` config
+
 ## [0.1.0] - 2026-05-29
 
 ### <!-- 0 -->⛰️  Features

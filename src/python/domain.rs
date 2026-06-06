@@ -29,7 +29,10 @@ fn pose(p: mt::Pose2D) -> (f64, f64, f64) {
 }
 
 fn poly_points(poly: &mt::Polygon) -> Vec<(f64, f64)> {
-    mt::polygon_exterior_points(poly).into_iter().map(pt).collect()
+    mt::polygon_exterior_points(poly)
+        .into_iter()
+        .map(pt)
+        .collect()
 }
 
 // -----------------------------------------------------------------------------
@@ -46,12 +49,16 @@ pub struct PySplitBoundary {
 impl PySplitBoundary {
     #[staticmethod]
     fn vertical(x: f64) -> Self {
-        Self { inner: mt::SplitBoundary::Vertical { x } }
+        Self {
+            inner: mt::SplitBoundary::Vertical { x },
+        }
     }
 
     #[staticmethod]
     fn horizontal(y: f64) -> Self {
-        Self { inner: mt::SplitBoundary::Horizontal { y } }
+        Self {
+            inner: mt::SplitBoundary::Horizontal { y },
+        }
     }
 
     #[getter]
@@ -139,7 +146,11 @@ impl PySwath {
 }
 
 fn swath_list(swaths: &[mt::Swath]) -> Vec<PySwath> {
-    swaths.iter().cloned().map(|inner| PySwath { inner }).collect()
+    swaths
+        .iter()
+        .cloned()
+        .map(|inner| PySwath { inner })
+        .collect()
 }
 
 // -----------------------------------------------------------------------------
@@ -178,7 +189,11 @@ impl PyRing {
 }
 
 fn ring_list(rings: &[mt::Ring]) -> Vec<PyRing> {
-    rings.iter().cloned().map(|inner| PyRing { inner }).collect()
+    rings
+        .iter()
+        .cloned()
+        .map(|inner| PyRing { inner })
+        .collect()
 }
 
 // -----------------------------------------------------------------------------
@@ -195,7 +210,9 @@ pub struct PyPart {
 impl PyPart {
     #[getter]
     fn boundary(&self) -> PyRing {
-        PyRing { inner: self.inner.boundary.clone() }
+        PyRing {
+            inner: self.inner.boundary.clone(),
+        }
     }
     #[getter]
     fn swaths(&self) -> Vec<PySwath> {
@@ -225,7 +242,11 @@ impl PyPart {
 }
 
 pub(crate) fn part_list(parts: &[mt::Part]) -> Vec<PyPart> {
-    parts.iter().cloned().map(|inner| PyPart { inner }).collect()
+    parts
+        .iter()
+        .cloned()
+        .map(|inner| PyPart { inner })
+        .collect()
 }
 
 // -----------------------------------------------------------------------------
@@ -507,10 +528,9 @@ pub struct PyDivisionResult {
 impl PyDivisionResult {
     #[getter]
     fn pattern_used(&self) -> Option<String> {
-        self.inner.pattern_used.map(|p| {
-            super::tagged_enums::PyDivisionPattern { inner: p }
-                .__repr__()
-        })
+        self.inner
+            .pattern_used
+            .map(|p| super::tagged_enums::PyDivisionPattern { inner: p }.__repr__())
     }
     #[getter]
     fn swaths_per_machine(&self) -> Vec<Vec<PySwath>> {
@@ -772,7 +792,9 @@ impl PyPlannedMachines {
     }
     #[getter]
     fn division(&self) -> PyDivisionResult {
-        PyDivisionResult { inner: self.inner.division.clone() }
+        PyDivisionResult {
+            inner: self.inner.division.clone(),
+        }
     }
     #[getter]
     fn machines(&self) -> Vec<PyMachinePlannedPart> {

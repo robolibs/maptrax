@@ -4,7 +4,7 @@
 #include "../../include/maptrax.h"
 
 int main(void) {
-  MaptraxPlannerHandle* planner = maptrax_planner_new();
+  MaptraxPlanner* planner = maptrax_planner_new();
   MaptraxCoord2 border[] = {
       {0.0, 0.0},
       {100.0, 0.0},
@@ -31,7 +31,7 @@ int main(void) {
   printf("part_count=%zu\n", maptrax_planner_part_count(planner));
   printf("total_area=%.3f\n", maptrax_planner_total_area(planner));
 
-  MaptraxPartSnapshotHandle* snapshot = maptrax_planner_part_snapshot(planner, 0);
+  MaptraxPartSnapshot* snapshot = maptrax_planner_part_snapshot(planner, 0);
   if (snapshot == NULL) {
     fprintf(stderr, "part_snapshot failed: %s\n", maptrax_last_error_message());
     return 1;
@@ -44,7 +44,7 @@ int main(void) {
   printf("headlands=%zu\n", headlands.rings_len);
   printf("generated_swaths=%zu\n", generated.swaths_len);
 
-  MaptraxPlanResultHandle* result = maptrax_planner_plan_part(
+  MaptraxPlanResult* result = maptrax_planner_plan_part(
       planner,
       0,
       (MaptraxRoutingOptions){MAPTRAX_ROUTING_GREEDY_NEAREST, 0},
@@ -67,7 +67,7 @@ int main(void) {
   printf("ordered_swaths=%zu\n", ordered.swaths_len);
   printf("tour_swaths=%zu\n", tour.swaths_len);
 
-  MaptraxStagesResultHandle* staged = maptrax_planner_plan_stages_part(
+  MaptraxStagesResult* staged = maptrax_planner_plan_stages_part(
       planner,
       0,
       (MaptraxRoutingOptions){MAPTRAX_ROUTING_GREEDY_NEAREST, 0},
@@ -92,7 +92,7 @@ int main(void) {
   printf("staged_ordered_swaths=%zu\n", staged_ordered.swaths_len);
   printf("staged_tour_swaths=%zu\n", staged_tour.swaths_len);
 
-  MaptraxPosePathHandle* rs = maptrax_plan_reeds_shepp(
+  MaptraxPosePath* rs = maptrax_plan_reeds_shepp(
       (MaptraxPose2){0.0, 0.0, 0.0},
       (MaptraxPose2){0.0, 18.0, M_PI},
       4.0,

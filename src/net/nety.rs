@@ -52,6 +52,14 @@ pub enum RoutingStrategy {
     GreedyNearest,
     Snake,
     Spiral,
+    /// Visit rows in modulo-`stride` groups so consecutive passes are `stride`
+    /// rows apart — giving the turner more lateral room. `stride: 1` == `Snake`.
+    SkipRows { stride: usize },
+    /// Like `SkipRows`, but the stride is derived from the turn model's
+    /// required lateral row spacing. The facade resolves this to a concrete
+    /// `SkipRows { stride }` before routing; if it reaches `Nety` unresolved
+    /// (no turn config available) it degrades to `stride: 1`.
+    TurnRadiusAware,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,8 +275,7 @@ impl Nety {
     fn plan_traversal(&self, start_point: Point, options: RoutingOptions) -> Vec<Swath> {
         let mut traversal = match options.strategy {
             RoutingStrategy::GreedyNearest => self.greedy_nearest_order(start_point),
-            RoutingStrategy::Snake => self.pattern_order(start_point, RoutingStrategy::Snake),
-            RoutingStrategy::Spiral => self.pattern_order(start_point, RoutingStrategy::Spiral),
+            strategy => self.pattern_order(start_point, strategy),
         };
 
         if options.local_improvement_passes > 0 && traversal.len() >= 3 {
@@ -325,6 +332,10 @@ impl Nety {
         let ordered_indices = match strategy {
             RoutingStrategy::Snake => snake_indices(canonical),
             RoutingStrategy::Spiral => spiral_indices(canonical, start_point, &self.swaths),
+            RoutingStrategy::SkipRows { stride } => skip_row_indices(canonical, stride),
+            // Unresolved TurnRadiusAware (no turn config here) degrades to
+            // adjacent-row order; the facade normally resolves it to SkipRows.
+            RoutingStrategy::TurnRadiusAware => snake_indices(canonical),
             RoutingStrategy::GreedyNearest => unreachable!(),
         };
 
@@ -377,6 +388,30 @@ fn direction_dot(swath: &Swath, tangent: (f64, f64)) -> f64 {
 
 fn snake_indices(indices: Vec<usize>) -> Vec<usize> {
     indices
+}
+
+/// Reorder a canonical (row-sorted) index list into modulo-`stride` groups so
+/// consecutive visited rows are `stride` apart. Within a group the rows stay in
+/// canonical order; alternate groups are reversed (serpentine) to shorten the
+/// deadhead return between groups.
+///
+/// `canonical = [0,1,2,3,4,5,6,7,8,9]`, `stride = 3` →
+/// group0 `0,3,6,9`, group1 reversed `7,4,1`, group2 `2,5,8`.
+fn skip_row_indices(canonical: Vec<usize>, stride: usize) -> Vec<usize> {
+    let stride = stride.max(1);
+    if stride == 1 {
+        return canonical;
+    }
+    let n = canonical.len();
+    let mut out = Vec::with_capacity(n);
+    for (group, offset) in (0..stride).enumerate() {
+        let mut rows: Vec<usize> = (offset..n).step_by(stride).map(|k| canonical[k]).collect();
+        if group % 2 == 1 {
+            rows.reverse();
+        }
+        out.extend(rows);
+    }
+    out
 }
 
 fn spiral_indices(indices: Vec<usize>, start_point: Point, swaths: &[Swath]) -> Vec<usize> {
@@ -472,4 +507,29 @@ fn deadhead_distance(start_point: Point, traversal: &[Swath]) -> f64 {
         total += point_distance(pair[0].tail(), pair[1].head());
     }
     total
+}
+
+#[cfg(test)]
+mod skip_row_tests {
+    use super::skip_row_indices;
+
+    #[test]
+    fn stride_one_is_identity() {
+        assert_eq!(skip_row_indices(vec![0, 1, 2, 3], 1), vec![0, 1, 2, 3]);
+        assert_eq!(skip_row_indices(vec![0, 1, 2, 3], 0), vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn stride_three_groups_with_serpentine() {
+        // groups: [0,3,6,9], reversed [7,4,1], [2,5,8]
+        let out = skip_row_indices(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 3);
+        assert_eq!(out, vec![0, 3, 6, 9, 7, 4, 1, 2, 5, 8]);
+    }
+
+    #[test]
+    fn permutation_is_preserved() {
+        let mut out = skip_row_indices((0..17).collect(), 4);
+        out.sort_unstable();
+        assert_eq!(out, (0..17).collect::<Vec<_>>());
+    }
 }

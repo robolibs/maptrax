@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, clippy::collapsible_if)]
 
 use std::error::Error;
 
@@ -194,7 +194,10 @@ fn points2(points: &[Point]) -> Vec<[f32; 2]> {
 }
 
 fn points_geo(points: &[Point], datum: Geo) -> Vec<[f64; 2]> {
-    points.iter().map(|point| point_geo(*point, datum)).collect()
+    points
+        .iter()
+        .map(|point| point_geo(*point, datum))
+        .collect()
 }
 
 fn close_points(mut points: Vec<[f32; 2]>) -> Vec<[f32; 2]> {

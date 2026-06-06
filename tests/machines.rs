@@ -1,5 +1,5 @@
 use concord::{Geo, Wgs, to_enu};
-use maptrax::{Point, Point2Ext, point_xy};
+use maptrax::point_xy;
 use maptrax::{
     Balance, DivisionPattern, DivisionPlan, MachinePlanningOptions, Maptrax, RoutingOptions,
     RoutingStrategy, SwathType, TurnPlannerConfig, polygon_from_points,

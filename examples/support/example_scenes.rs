@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use concord::{Wgs, to_enu};
-use maptrax::{Geo, Point, Polygon, Swath, SwathType, point_xy, polygon_from_points};
+use maptrax::{Geo, Polygon, Swath, SwathType, point_xy, polygon_from_points};
 
 pub fn upstream_datum() -> Geo {
     Geo::new(51.98954034749562, 5.6584737410504715, 53.801823)

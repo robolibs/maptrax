@@ -1,9 +1,11 @@
+#![allow(clippy::approx_constant)]
+
 use std::f64::consts::PI;
 
-use maptrax::{Point, Point2Ext, point_xy};
 use maptrax::{
     Dubins, DubinsSegmentType, Pose2D, ReedsShepp, ReedsSheppSegmentType, Sharper, point_distance,
 };
+use maptrax::{Point2Ext, point_xy};
 
 fn assert_pose_close(actual: Pose2D, expected: Pose2D, tol: f64) {
     assert!(point_distance(actual.point, expected.point) <= tol);

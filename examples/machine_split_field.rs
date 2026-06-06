@@ -21,9 +21,9 @@
 mod rerun_viz;
 
 use maptrax::{
-    Balance, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode, Geo, Point,
-    FieldGenerationOptions, Maptrax, RoutingOptions, RoutingStrategy, Swath, TurnPlannerConfig,
-    TurnPlannerModel, point_xy, polygon_from_points, segment_length,
+    Balance, DecompositionMode, DivisionPattern, DivisionPlan, FieldGenerationMode,
+    FieldGenerationOptions, Geo, Maptrax, Point, RoutingOptions, RoutingStrategy, Swath,
+    TurnPlannerConfig, TurnPlannerModel, point_xy, polygon_from_points, segment_length,
 };
 use rerun::Color;
 
@@ -85,11 +85,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   Split into {part_count} sub-field(s).");
     println!();
 
-    // Per-sub-field headland rings. The "owner" sub-field of each split
-    // edge has the full headland inset along that edge (providing the
-    // midline turn space). The "non-owner" sub-field's headland ring
-    // skips the inset along that edge — its swaths reach the split line
-    // directly and use the neighbour's headland to turn.
+    // Per-sub-field headland rings. On an AutoSplit shared edge, the
+    // non-owned side keeps its outermost headland on the split line (no empty
+    // seam) and offsets deeper rings normally (no collapsed/overlapping
+    // multi-headland lines).
     for (part_index, part) in planner.field()?.get_parts().iter().enumerate() {
         for (ring_index, ring) in part.headlands.iter().enumerate() {
             rerun_viz::log_polygon(

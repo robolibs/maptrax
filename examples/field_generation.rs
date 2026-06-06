@@ -1,6 +1,4 @@
-use maptrax::{
-    Field, Geo, SwathAngleSearchOptions, SwathObjective, point_xy, polygon_from_points,
-};
+use maptrax::{Field, Geo, SwathAngleSearchOptions, SwathObjective, point_xy, polygon_from_points};
 
 fn main() {
     let polygon = polygon_from_points(vec![
