@@ -45,7 +45,11 @@ pub use field::{
     generate_headlands_for_polygon, generate_swaths_for_polygon,
 };
 pub use net::{ABLine, Nety, RoutingOptions, RoutingStrategy};
-pub use tour::{ConnectorMode, TourBuilder, TurnPlannerConfig, TurnPlannerModel};
+pub use tour::{
+    ConnectorMode, HeadlandSizingPolicy, TourBuilder, TourValidation, TurnFeasibilityReport,
+    TurnPlannerConfig, TurnPlannerModel, TurnSpaceRequirement, required_headland_count,
+    required_row_skip_stride, turn_feasibility_report, validate_tour,
+};
 pub use turners::{
     Dubins, DubinsPath, DubinsSegment, DubinsSegmentType, Pose2D, ReedsShepp, ReedsSheppPath,
     ReedsSheppSegment, ReedsSheppSegmentType, SharpTurnPath, Sharper,

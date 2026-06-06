@@ -58,6 +58,13 @@ pub enum PyRoutingStrategy {
     Snake,
     #[pyo3(name = "SPIRAL")]
     Spiral,
+    /// Skip-row ordering. As a plain enum this carries no stride (defaults to
+    /// 1); use the `routing_strategy="skip_rows"` + `stride=` keyword on
+    /// `plan_machines` to set a concrete stride.
+    #[pyo3(name = "SKIP_ROWS")]
+    SkipRows,
+    #[pyo3(name = "TURN_RADIUS_AWARE")]
+    TurnRadiusAware,
 }
 
 impl From<PyRoutingStrategy> for mt::RoutingStrategy {
@@ -66,6 +73,8 @@ impl From<PyRoutingStrategy> for mt::RoutingStrategy {
             PyRoutingStrategy::GreedyNearest => mt::RoutingStrategy::GreedyNearest,
             PyRoutingStrategy::Snake => mt::RoutingStrategy::Snake,
             PyRoutingStrategy::Spiral => mt::RoutingStrategy::Spiral,
+            PyRoutingStrategy::SkipRows => mt::RoutingStrategy::SkipRows { stride: 1 },
+            PyRoutingStrategy::TurnRadiusAware => mt::RoutingStrategy::TurnRadiusAware,
         }
     }
 }
@@ -76,6 +85,8 @@ impl From<mt::RoutingStrategy> for PyRoutingStrategy {
             mt::RoutingStrategy::GreedyNearest => PyRoutingStrategy::GreedyNearest,
             mt::RoutingStrategy::Snake => PyRoutingStrategy::Snake,
             mt::RoutingStrategy::Spiral => PyRoutingStrategy::Spiral,
+            mt::RoutingStrategy::SkipRows { .. } => PyRoutingStrategy::SkipRows,
+            mt::RoutingStrategy::TurnRadiusAware => PyRoutingStrategy::TurnRadiusAware,
         }
     }
 }

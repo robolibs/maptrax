@@ -663,8 +663,8 @@ dependencies = [
 
 [[package]]
 name = "concord"
-version = "0.1.0"
-source = "git+https://codeberg.org/robolibs/concord.git?tag=0.1.0#e1d4fabb58eb0ea963ebd4d4c9d7406a42c4e0b1"
+version = "0.1.1"
+source = "git+https://codeberg.org/robolibs/concord.git?tag=0.1.1#070bb5b19a3d802c8dc48a6f4e0cc0fefcd198af"
 dependencies = [
  "datapod",
  "graphix",
@@ -897,8 +897,8 @@ dependencies = [
 
 [[package]]
 name = "datapod"
-version = "0.2.0"
-source = "git+https://codeberg.org/robolibs/datapod.git?tag=0.2.0#bf7839e417050b1fab33167c418595bf86313894"
+version = "0.4.0"
+source = "git+https://codeberg.org/robolibs/datapod.git?tag=0.4.0#e90e11ce9d3e6a2269b4c86b6b1a441b1b6981fe"
 dependencies = [
  "bytemuck",
  "datapod-macros",
@@ -907,7 +907,7 @@ dependencies = [
 [[package]]
 name = "datapod-macros"
 version = "0.0.1"
-source = "git+https://codeberg.org/robolibs/datapod.git?tag=0.2.0#bf7839e417050b1fab33167c418595bf86313894"
+source = "git+https://codeberg.org/robolibs/datapod.git?tag=0.4.0#e90e11ce9d3e6a2269b4c86b6b1a441b1b6981fe"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -943,7 +943,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1060,7 +1060,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1324,8 +1324,8 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "graphix"
-version = "0.1.0"
-source = "git+https://codeberg.org/robolibs/graphix.git?tag=0.1.0#4ec1dd507ec3fb87fce6aab55aea788ebf15b837"
+version = "0.1.1"
+source = "git+https://codeberg.org/robolibs/graphix.git?tag=0.1.1#bc9e51107ef2c63e91eb497257eeea8adc8dd2b6"
 dependencies = [
  "datapod",
  "glam",
@@ -1763,7 +1763,7 @@ dependencies = [
  "portable-atomic-util",
  "serde_core",
  "wasm-bindgen",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2156,7 +2156,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3668,7 +3668,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4805,7 +4805,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

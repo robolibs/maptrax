@@ -8,6 +8,9 @@ pub enum MaptraxError {
     InvalidMachineCount,
     MissingPart(usize),
     MissingField,
+    /// A requested plan cannot satisfy turn-feasibility constraints (e.g. too
+    /// few headlands for the turn model under `StrictUser` policy).
+    InfeasiblePlan(String),
 }
 
 impl Display for MaptraxError {
@@ -18,6 +21,7 @@ impl Display for MaptraxError {
             Self::InvalidMachineCount => write!(f, "machine count must be greater than zero"),
             Self::MissingPart(index) => write!(f, "part index {index} is out of bounds"),
             Self::MissingField => write!(f, "field has not been set"),
+            Self::InfeasiblePlan(message) => write!(f, "infeasible plan: {message}"),
         }
     }
 }

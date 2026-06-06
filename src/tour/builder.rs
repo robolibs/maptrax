@@ -1,7 +1,7 @@
 use crate::core::{
     Point, Point2Ext, Polygon, Segment, aabb_from_points, angle_difference, heading_between,
-    point_distance, point_xy, points_equal, polygon_open_vertices, segment_end, segment_new,
-    segment_start,
+    point_distance, point_xy, points_equal, polygon_from_points, polygon_open_vertices, segment_end,
+    segment_new, segment_start,
 };
 use crate::field::{Part, Swath, SwathType, create_swath};
 use crate::turners::{Dubins, Pose2D, ReedsShepp, Sharper};
@@ -53,6 +53,155 @@ impl Default for TurnPlannerConfig {
     }
 }
 
+/// How much space a turn model needs to connect adjacent rows feasibly.
+/// See PLAN.md "Required Turn Space Model". Conservative estimates — tune
+/// against visual tests.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TurnSpaceRequirement {
+    /// Headland band depth (metres) needed for a U-turn between adjacent rows.
+    pub min_headland_depth: f64,
+    /// Lateral distance (metres) between consecutive passes for a comfortable turn.
+    pub min_lateral_row_spacing: f64,
+    /// Whether the model can use reverse segments to turn in tighter space.
+    pub supports_reverse: bool,
+}
+
+/// Policy for reconciling a user's requested headland count with the count the
+/// turn model actually needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeadlandSizingPolicy {
+    /// Keep the user's count; error if it is below the required count.
+    StrictUser,
+    /// Keep the user's count, but surface a warning when it is too low.
+    WarnOnly,
+    /// Use `max(user, required)`.
+    AutoIncrease,
+}
+
+impl Default for HeadlandSizingPolicy {
+    fn default() -> Self {
+        Self::WarnOnly
+    }
+}
+
+/// Why a particular headland count / row-skip stride was chosen for a plan.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TurnFeasibilityReport {
+    pub requested_headland_count: usize,
+    pub required_headland_count: usize,
+    pub effective_headland_count: usize,
+    pub row_skip_stride: usize,
+    pub required_headland_depth: f64,
+    pub required_lateral_row_spacing: f64,
+    pub turn_model: TurnPlannerModel,
+    pub warnings: Vec<String>,
+}
+
+impl TurnPlannerConfig {
+    /// Conservative estimate of the turn space this configuration needs.
+    pub fn required_turn_space(&self) -> TurnSpaceRequirement {
+        let r = self.min_turning_radius.max(0.0);
+        let half_w = 0.5 * self.machine_width.max(0.0);
+        match self.model {
+            TurnPlannerModel::Dubins => TurnSpaceRequirement {
+                min_headland_depth: 2.0 * r + half_w,
+                min_lateral_row_spacing: 2.0 * r,
+                supports_reverse: false,
+            },
+            // `Auto` resolves to Reeds-Shepp in open space and Sharper when
+            // tight; use the Reeds-Shepp estimate as the conservative middle.
+            TurnPlannerModel::ReedsShepp | TurnPlannerModel::Auto => TurnSpaceRequirement {
+                min_headland_depth: r + half_w,
+                min_lateral_row_spacing: r,
+                supports_reverse: true,
+            },
+            TurnPlannerModel::Sharper => TurnSpaceRequirement {
+                min_headland_depth: self.machine_length.max(r) + half_w,
+                min_lateral_row_spacing: self.machine_width.max(0.0),
+                supports_reverse: true,
+            },
+        }
+    }
+
+    /// Headland rings needed so the U-turn fits inside the reserved band.
+    pub fn required_headland_count(&self, swath_width: f64) -> usize {
+        required_headland_count(swath_width, self)
+    }
+
+    /// Row-skip stride needed so consecutive passes are far enough apart.
+    pub fn required_row_skip_stride(&self, swath_width: f64) -> usize {
+        required_row_skip_stride(swath_width, self)
+    }
+}
+
+/// `ceil(required_headland_depth / swath_width)`. Returns 0 for non-positive
+/// swath width (nothing meaningful to size against).
+pub fn required_headland_count(swath_width: f64, cfg: &TurnPlannerConfig) -> usize {
+    if swath_width <= 0.0 {
+        return 0;
+    }
+    let depth = cfg.required_turn_space().min_headland_depth;
+    (depth / swath_width).ceil().max(0.0) as usize
+}
+
+/// `ceil(required_lateral_row_spacing / swath_width)`, at least 1.
+pub fn required_row_skip_stride(swath_width: f64, cfg: &TurnPlannerConfig) -> usize {
+    if swath_width <= 0.0 {
+        return 1;
+    }
+    let spacing = cfg.required_turn_space().min_lateral_row_spacing;
+    ((spacing / swath_width).ceil() as i64).max(1) as usize
+}
+
+/// Combine turn-space sizing with a user request and a policy into a report:
+/// the effective headland count to use, the row-skip stride needed to recover
+/// any lateral spacing the headland band cannot provide, and any warnings.
+pub fn turn_feasibility_report(
+    swath_width: f64,
+    requested_headland_count: usize,
+    cfg: &TurnPlannerConfig,
+    policy: HeadlandSizingPolicy,
+) -> TurnFeasibilityReport {
+    let req = cfg.required_turn_space();
+    let required = required_headland_count(swath_width, cfg);
+    let mut warnings = Vec::new();
+
+    let effective = match policy {
+        HeadlandSizingPolicy::StrictUser => requested_headland_count,
+        HeadlandSizingPolicy::WarnOnly => {
+            if requested_headland_count < required {
+                warnings.push(format!(
+                    "requested {requested_headland_count} headlands but {:?} needs {required} \
+                     for min_turning_radius={:.2}m (will lean on row skipping)",
+                    cfg.model, cfg.min_turning_radius
+                ));
+            }
+            requested_headland_count
+        }
+        HeadlandSizingPolicy::AutoIncrease => requested_headland_count.max(required),
+    };
+
+    // If the effective headland band is shallower than the turn needs, recover
+    // the missing space laterally by skipping rows.
+    let effective_depth = effective as f64 * swath_width;
+    let row_skip_stride = if swath_width <= 0.0 || effective_depth + 1e-9 >= req.min_headland_depth {
+        1
+    } else {
+        required_row_skip_stride(swath_width, cfg)
+    };
+
+    TurnFeasibilityReport {
+        requested_headland_count,
+        required_headland_count: required,
+        effective_headland_count: effective,
+        row_skip_stride,
+        required_headland_depth: req.min_headland_depth,
+        required_lateral_row_spacing: req.min_lateral_row_spacing,
+        turn_model: cfg.model,
+        warnings,
+    }
+}
+
 pub struct TourBuilder;
 
 impl TourBuilder {
@@ -63,8 +212,10 @@ impl TourBuilder {
 
         let headland_ring = outer_headland_ring(part);
         // Turns must not cut through the work area — the region inside the
-        // innermost headland ring (where swaths live).
+        // innermost headland ring (where swaths live) — nor swing outside the
+        // field border.
         let work_area = innermost_headland_ring(part);
+        let field = Some(&part.boundary.polygon);
         let mut out = Vec::with_capacity(ordered_swaths.len() * 2);
 
         for (index, swath) in ordered_swaths.iter().enumerate() {
@@ -75,6 +226,7 @@ impl TourBuilder {
                     next,
                     headland_ring,
                     work_area,
+                    field,
                     cfg,
                 ));
             }
@@ -103,6 +255,7 @@ impl TourBuilder {
         }
 
         let work_area = innermost_headland_ring(part);
+        let field = Some(&part.boundary.polygon);
         let mut out: Vec<Swath> = Vec::new();
 
         for arc in headland_arcs {
@@ -111,7 +264,7 @@ impl TourBuilder {
             }
 
             if let Some(prev) = out.last() {
-                if let Some(conn) = build_connector(prev, arc[0], arc[1], work_area, cfg) {
+                if let Some(conn) = build_connector(prev, arc[0], arc[1], work_area, field, cfg) {
                     out.push(conn);
                 }
             }
@@ -186,6 +339,7 @@ fn build_connector(
     next_start: Point,
     next_second: Point,
     work_area: Option<&Polygon>,
+    field: Option<&Polygon>,
     cfg: &TurnPlannerConfig,
 ) -> Option<Swath> {
     if points_equal(prev.tail(), next_start, 1e-6) {
@@ -206,6 +360,7 @@ fn build_connector(
         next_start,
         to_heading,
         work_area,
+        field,
         cfg,
     )?;
     connector.r#type = SwathType::Connection;
@@ -248,33 +403,30 @@ fn connect_between_swaths(
     to: &Swath,
     field_ring: &Polygon,
     work_area: Option<&Polygon>,
+    field: Option<&Polygon>,
     cfg: &TurnPlannerConfig,
 ) -> Vec<Swath> {
-    let headland = headland_connection_plan(from, to, field_ring, work_area, cfg);
+    let headland = headland_connection_plan(from, to, field_ring, work_area, field, cfg);
 
     match cfg.connector_mode {
         ConnectorMode::Direct => {
-            // Rare: caller explicitly wants a tight swath-to-swath turn and
-            // accepts that it may pass across finished rows when no headland
-            // detour is possible. Still prefer the headland route if it is
-            // available.
-            let direct = direct_connection_plan(from, to, work_area, cfg);
-            return direct
-                .or(headland)
-                .map(|plan| plan.segments)
-                .unwrap_or_default();
+            // Tight swath-to-swath turn at the row end (no headland detour).
+            // Still prefer the headland route if the direct turn isn't viable.
+            let direct = direct_connection_plan(from, to, work_area, field, cfg);
+            direct.or(headland).map(|plan| plan.segments).unwrap_or_default()
         }
         ConnectorMode::Headland | ConnectorMode::Auto => {
             // Realistic farming rule: never cut across finished swaths.
             // Always route through the headland band.
             if let Some(plan) = headland {
-                return plan.segments;
+                plan.segments
+            } else {
+                // Only fall back to a direct turn when the field has no
+                // headlands at all.
+                direct_connection_plan(from, to, work_area, field, cfg)
+                    .map(|plan| plan.segments)
+                    .unwrap_or_default()
             }
-            // Only fall back to a direct turn when the field has no
-            // headlands at all.
-            return direct_connection_plan(from, to, work_area, cfg)
-                .map(|plan| plan.segments)
-                .unwrap_or_default();
         }
     }
 }
@@ -283,6 +435,7 @@ fn direct_connection_plan(
     from: &Swath,
     to: &Swath,
     work_area: Option<&Polygon>,
+    field: Option<&Polygon>,
     cfg: &TurnPlannerConfig,
 ) -> Option<ConnectorPlan> {
     direct_connection_swath_points(
@@ -291,6 +444,7 @@ fn direct_connection_plan(
         to.head(),
         heading_between(to.head(), to.tail()),
         work_area,
+        field,
         cfg,
     )
     .map(|swath| ConnectorPlan {
@@ -303,19 +457,28 @@ fn headland_connection_plan(
     to: &Swath,
     headland_ring: &Polygon,
     work_area: Option<&Polygon>,
+    field: Option<&Polygon>,
     cfg: &TurnPlannerConfig,
 ) -> Option<ConnectorPlan> {
     let from_end = from.tail();
     let to_start = to.head();
-    let start_proj = project_to_ring(headland_ring, from_end)?;
-    let goal_proj = project_to_ring(headland_ring, to_start)?;
-    let ring_path = shorter_ring_path(headland_ring, start_proj, goal_proj);
+    // Densify the ring into many interpolated nodes so the connector can attach
+    // right next to the row end and follow the band smoothly (a bare polygon
+    // ring has only its corner vertices — a rectangle ring = 4 points).
+    let dense_ring = densify_polygon(headland_ring, RING_NODE_SPACING_M);
+    let start_proj = project_to_ring(&dense_ring, from_end)?;
+    let goal_proj = project_to_ring(&dense_ring, to_start)?;
+    let ring_path = shorter_ring_path(&dense_ring, start_proj, goal_proj);
     if ring_path.len() < 2 {
         return None;
     }
     let ring_path = smooth_headland_path(&ring_path, cfg);
 
     let mut out = Vec::new();
+
+    // ENTER: a TURNER-planned maneuver (Dubins / Reeds-Shepp / Sharper) from the
+    // row end onto the ring. The turner respects the turning radius, so the turn
+    // is drivable — never a hard corner.
     if !points_equal(from_end, start_proj.point, 1e-6) {
         if let Some(mut enter) = direct_connection_swath_points(
             from_end,
@@ -326,6 +489,7 @@ fn headland_connection_plan(
                 ring_path.get(1).copied().unwrap_or(start_proj.point),
             ),
             work_area,
+            field,
             cfg,
         ) {
             enter.r#type = SwathType::Connection;
@@ -333,6 +497,7 @@ fn headland_connection_plan(
         }
     }
 
+    // FOLLOW: drive the dense headland ring between the two attach points.
     let mut ring_swath = create_swath(
         ring_path[0],
         *ring_path.last().unwrap(),
@@ -343,6 +508,7 @@ fn headland_connection_plan(
     ring_swath.bounding_box = aabb_from_points(&ring_path);
     out.push(ring_swath);
 
+    // EXIT: TURNER-planned maneuver from the ring back into the next row.
     if !points_equal(goal_proj.point, to_start, 1e-6) {
         if let Some(mut exit) = direct_connection_swath_points(
             goal_proj.point,
@@ -356,6 +522,7 @@ fn headland_connection_plan(
             to_start,
             heading_between(to.head(), to.tail()),
             work_area,
+            field,
             cfg,
         ) {
             exit.r#type = SwathType::Connection;
@@ -372,6 +539,7 @@ fn direct_connection_swath_points(
     goal_point: Point,
     goal_yaw: f64,
     work_area: Option<&Polygon>,
+    field: Option<&Polygon>,
     cfg: &TurnPlannerConfig,
 ) -> Option<Swath> {
     let distance = point_distance(start_point, goal_point);
@@ -454,7 +622,7 @@ fn direct_connection_swath_points(
         }
     };
 
-    let (polyline, reverse_flags) = select_best_path(candidates, work_area)?;
+    let (polyline, reverse_flags) = select_best_path(candidates, work_area, field)?;
     if polyline.len() < 2 {
         return straight_connection_swath(start_point, goal_point);
     }
@@ -484,6 +652,7 @@ fn direct_connection_swath_points(
 fn select_best_path(
     candidates: Vec<(Vec<Point>, Vec<bool>)>,
     work_area: Option<&Polygon>,
+    field: Option<&Polygon>,
 ) -> Option<(Vec<Point>, Vec<bool>)> {
     if candidates.is_empty() {
         return None;
@@ -495,11 +664,18 @@ fn select_best_path(
         if points.len() < 2 {
             continue;
         }
+        // A clean turn stays OUT of the work area (no cutting across finished
+        // rows) AND INSIDE the field boundary (no swinging off the field — the
+        // failure mode for forward-only Dubins turns near the edge).
         let clean_of_work_area = match work_area {
             Some(polygon) => path_stays_outside(&points, polygon),
             None => true,
         };
-        if clean_of_work_area {
+        let inside_field = match field {
+            Some(polygon) => path_stays_inside(&points, polygon),
+            None => true,
+        };
+        if clean_of_work_area && inside_field {
             clean.push((points.clone(), reverse.clone()));
         }
         all.push((points, reverse));
@@ -511,6 +687,100 @@ fn select_best_path(
             .partial_cmp(&polyline_length(b))
             .unwrap_or(std::cmp::Ordering::Equal)
     })
+}
+
+/// True if every sampled point of `path` lies inside (or within `tol` of) the
+/// polygon boundary. Used to reject turn arcs that swing outside the field.
+fn path_stays_inside(path: &[Point], polygon: &Polygon) -> bool {
+    const SAMPLE_STEP: f64 = 0.2;
+    const TOL: f64 = 0.05;
+    for pair in path.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let len = point_distance(a, b);
+        let samples = ((len / SAMPLE_STEP).ceil() as usize).max(1);
+        for s in 0..=samples {
+            let t = s as f64 / samples as f64;
+            let p = point_xy(a.x() + t * (b.x() - a.x()), a.y() + t * (b.y() - a.y()));
+            if point_outside_polygon(p, polygon, TOL) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// A point is "outside" only if it is neither inside nor within `tol` of the
+/// boundary (so points sitting on an edge by construction are not rejected).
+fn point_outside_polygon(point: Point, polygon: &Polygon, tol: f64) -> bool {
+    if point_in_polygon(point, polygon) {
+        return false;
+    }
+    let ring = polygon_open_vertices(polygon);
+    for i in 0..ring.len() {
+        let a = ring[i];
+        let b = ring[(i + 1) % ring.len()];
+        if segment_distance_to_point(segment_new(a, b), point) <= tol {
+            return false;
+        }
+    }
+    true
+}
+
+/// Outcome of validating a tour's connector segments against the allowed
+/// corridor (inside the field boundary, outside the work area / headland band).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TourValidation {
+    /// Connector (turn) segments inspected.
+    pub connector_segments: usize,
+    /// Connectors with at least one point outside the field boundary.
+    pub outside_boundary: usize,
+    /// Connectors whose interior cuts through the work area (already-worked rows).
+    pub through_work_area: usize,
+}
+
+impl TourValidation {
+    /// True when no connector leaves the allowed corridor.
+    pub fn ok(&self) -> bool {
+        self.outside_boundary == 0 && self.through_work_area == 0
+    }
+
+    /// Total corridor violations.
+    pub fn violations(&self) -> usize {
+        self.outside_boundary + self.through_work_area
+    }
+}
+
+/// Validate that every connector segment in `tour` stays inside `boundary` and
+/// outside `work_area` (the headland-band corridor). Only `Connection`/`Around`
+/// segments are checked — the work rows themselves are not connectors.
+pub fn validate_tour(
+    tour: &[Swath],
+    boundary: &Polygon,
+    work_area: Option<&Polygon>,
+) -> TourValidation {
+    let mut result = TourValidation::default();
+    for swath in tour {
+        if swath.r#type != SwathType::Connection && swath.r#type != SwathType::Around {
+            continue;
+        }
+        result.connector_segments += 1;
+        let points: Vec<Point> = if swath.points.len() >= 2 {
+            swath.points.clone()
+        } else {
+            vec![swath.head(), swath.tail()]
+        };
+        // A point sitting on the boundary edge (e.g. clamped there) is on the
+        // field, not outside it — only count points genuinely beyond the edge.
+        if points.iter().any(|p| point_outside_polygon(*p, boundary, 0.06)) {
+            result.outside_boundary += 1;
+        }
+        if let Some(area) = work_area {
+            if !path_stays_outside(&points, area) {
+                result.through_work_area += 1;
+            }
+        }
+    }
+    result
 }
 
 /// Check whether `path` stays out of `polygon` — tested along each segment,
@@ -644,6 +914,7 @@ fn smooth_headland_path(points: &[Point], cfg: &TurnPlannerConfig) -> Vec<Point>
             corner_out,
             out_heading,
             None,
+            None,
             cfg,
         ) {
             for point in turn.points.into_iter().skip(1) {
@@ -667,6 +938,33 @@ struct Projection {
     point: Point,
     seg_idx: usize,
     t: f64,
+}
+
+/// Spacing for interpolated headland nodes. Dense nodes give connectors many
+/// attach points along the band so turns stay inside the field.
+const RING_NODE_SPACING_M: f64 = 0.5;
+
+/// Return a copy of `poly` with extra vertices interpolated along every edge,
+/// no farther apart than `step`. Turns the sparse corner-only ring into a dense
+/// point set the connectors can follow smoothly.
+fn densify_polygon(poly: &Polygon, step: f64) -> Polygon {
+    let verts = polygon_open_vertices(poly);
+    if verts.len() < 2 || step <= 0.0 {
+        return poly.clone();
+    }
+    let mut out: Vec<Point> = Vec::new();
+    for i in 0..verts.len() {
+        let a = verts[i];
+        let b = verts[(i + 1) % verts.len()];
+        out.push(a);
+        let dist = point_distance(a, b);
+        let n = (dist / step).floor() as usize;
+        for k in 1..n {
+            let t = k as f64 / n as f64;
+            out.push(point_xy(a.x() + (b.x() - a.x()) * t, a.y() + (b.y() - a.y()) * t));
+        }
+    }
+    polygon_from_points(out)
 }
 
 fn project_to_ring(ring: &Polygon, point: Point) -> Option<Projection> {
@@ -783,12 +1081,17 @@ fn point_in_polygon(point: Point, polygon: &Polygon) -> bool {
     for i in 0..ring.len() {
         let pi = ring[i];
         let pj = ring[j];
-        let intersects = ((pi.y() > point.y()) != (pj.y() > point.y()))
-            && (point.x()
-                < (pj.x() - pi.x()) * (point.y() - pi.y()) / ((pj.y() - pi.y()).abs().max(1e-12))
-                    + pi.x());
-        if intersects {
-            inside = !inside;
+        // Even-odd ray cast. The edge straddles the horizontal line at
+        // `point.y()` exactly when `(pi.y() > y) != (pj.y() > y)`, which also
+        // guarantees `pj.y() - pi.y() != 0`. The crossing x must use the
+        // *signed* dy — taking its absolute value flips the result for
+        // downward edges and misclassifies points.
+        if (pi.y() > point.y()) != (pj.y() > point.y()) {
+            let cross_x =
+                (pj.x() - pi.x()) * (point.y() - pi.y()) / (pj.y() - pi.y()) + pi.x();
+            if point.x() < cross_x {
+                inside = !inside;
+            }
         }
         j = i;
     }
@@ -798,4 +1101,84 @@ fn point_in_polygon(point: Point, polygon: &Polygon) -> bool {
 fn dedup_polyline(mut points: Vec<Point>) -> Vec<Point> {
     points.dedup_by(|a, b| point_distance(*a, *b) < 1e-9);
     points
+}
+
+#[cfg(test)]
+mod turn_space_tests {
+    use super::*;
+
+    fn cfg(model: TurnPlannerModel, radius: f64, length: f64, width: f64) -> TurnPlannerConfig {
+        TurnPlannerConfig {
+            model,
+            min_turning_radius: radius,
+            machine_length: length,
+            machine_width: width,
+            ..TurnPlannerConfig::default()
+        }
+    }
+
+    #[test]
+    fn dubins_needs_the_most_headland() {
+        // depth = 2r + w/2 = 16, ceil(16/3) = 6
+        let c = cfg(TurnPlannerModel::Dubins, 8.0, 6.0, 0.0);
+        assert_eq!(required_headland_count(3.0, &c), 6);
+        // lateral spacing = 2r = 16, ceil(16/3) = 6
+        assert_eq!(required_row_skip_stride(3.0, &c), 6);
+        assert!(!c.required_turn_space().supports_reverse);
+    }
+
+    #[test]
+    fn reeds_shepp_needs_less() {
+        // depth = r = 8, ceil(8/3) = 3
+        let c = cfg(TurnPlannerModel::ReedsShepp, 8.0, 6.0, 0.0);
+        assert_eq!(required_headland_count(3.0, &c), 3);
+        // lateral spacing = r = 9, ceil(9/3) = 3
+        let c2 = cfg(TurnPlannerModel::ReedsShepp, 9.0, 6.0, 0.0);
+        assert_eq!(required_row_skip_stride(3.0, &c2), 3);
+        assert!(c.required_turn_space().supports_reverse);
+    }
+
+    #[test]
+    fn sharper_uses_machine_length_and_width() {
+        // depth = max(len=6, r=8) + w/2 = 9.5, ceil(9.5/3) = 4
+        let c = cfg(TurnPlannerModel::Sharper, 8.0, 6.0, 3.0);
+        assert_eq!(required_headland_count(3.0, &c), 4);
+        // lateral spacing = width = 3, ceil(3/3) = 1
+        assert_eq!(required_row_skip_stride(3.0, &c), 1);
+    }
+
+    #[test]
+    fn auto_matches_reeds_shepp() {
+        let auto = cfg(TurnPlannerModel::Auto, 8.0, 6.0, 0.0);
+        let rs = cfg(TurnPlannerModel::ReedsShepp, 8.0, 6.0, 0.0);
+        assert_eq!(auto.required_turn_space(), rs.required_turn_space());
+    }
+
+    #[test]
+    fn warn_only_keeps_count_but_skips_rows() {
+        let c = cfg(TurnPlannerModel::Dubins, 8.0, 6.0, 0.0);
+        let report = turn_feasibility_report(3.0, 2, &c, HeadlandSizingPolicy::WarnOnly);
+        assert_eq!(report.required_headland_count, 6);
+        assert_eq!(report.effective_headland_count, 2);
+        assert!(!report.warnings.is_empty());
+        // 2 headlands (6 m) < 16 m needed → recover laterally via stride 6.
+        assert_eq!(report.row_skip_stride, 6);
+    }
+
+    #[test]
+    fn auto_increase_grows_headlands_and_drops_stride() {
+        let c = cfg(TurnPlannerModel::Dubins, 8.0, 6.0, 0.0);
+        let report = turn_feasibility_report(3.0, 2, &c, HeadlandSizingPolicy::AutoIncrease);
+        assert_eq!(report.effective_headland_count, 6);
+        // 6 headlands (18 m) >= 16 m needed → no row skipping required.
+        assert_eq!(report.row_skip_stride, 1);
+        assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn strict_user_keeps_request_untouched() {
+        let c = cfg(TurnPlannerModel::Dubins, 8.0, 6.0, 0.0);
+        let report = turn_feasibility_report(3.0, 2, &c, HeadlandSizingPolicy::StrictUser);
+        assert_eq!(report.effective_headland_count, 2);
+    }
 }

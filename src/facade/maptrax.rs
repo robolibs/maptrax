@@ -5,8 +5,11 @@ use crate::field::{
     DecompositionMode, Field, Part, Swath, SwathAngleSearchOptions, SwathAngleSearchResult,
     SwathObjective,
 };
-use crate::net::{Nety, RoutingOptions};
-use crate::tour::{TourBuilder, TurnPlannerConfig};
+use crate::net::{Nety, RoutingOptions, RoutingStrategy};
+use crate::tour::{
+    HeadlandSizingPolicy, TourBuilder, TourValidation, TurnFeasibilityReport, TurnPlannerConfig,
+    TurnPlannerModel, required_row_skip_stride, turn_feasibility_report, validate_tour,
+};
 use crate::turners::{
     Dubins, DubinsPath, Pose2D, ReedsShepp, ReedsSheppPath, SharpTurnPath, Sharper,
 };
@@ -174,6 +177,59 @@ impl Maptrax {
             .generate_with_objective(swath_width, objective, options, headland_count)
     }
 
+    /// Inspect turn feasibility for a candidate plan without mutating the field.
+    /// Reports the headland count the turn model needs, the count that would be
+    /// used under `policy`, and the row-skip stride to recover any shortfall.
+    pub fn turn_feasibility(
+        &self,
+        swath_width: f64,
+        requested_headland_count: usize,
+        turn: &TurnPlannerConfig,
+        policy: HeadlandSizingPolicy,
+    ) -> TurnFeasibilityReport {
+        turn_feasibility_report(swath_width, requested_headland_count, turn, policy)
+    }
+
+    /// Generate the field with a turn-feasibility-aware headland count.
+    ///
+    /// - `StrictUser`: errors if the requested count is below what the turn
+    ///   model needs.
+    /// - `WarnOnly`: keeps the requested count (warnings live in the report).
+    /// - `AutoIncrease`: raises the count to `max(requested, required)`.
+    ///
+    /// Returns the [`TurnFeasibilityReport`] describing the decision. The
+    /// low-level [`Maptrax::generate_field`] is left untouched for callers that
+    /// want exact control.
+    pub fn generate_field_feasible(
+        &mut self,
+        swath_width: f64,
+        angle_degrees: f64,
+        requested_headland_count: usize,
+        turn: &TurnPlannerConfig,
+        policy: HeadlandSizingPolicy,
+    ) -> Result<TurnFeasibilityReport> {
+        let report =
+            turn_feasibility_report(swath_width, requested_headland_count, turn, policy);
+        if policy == HeadlandSizingPolicy::StrictUser
+            && report.requested_headland_count < report.required_headland_count
+        {
+            return Err(MaptraxError::InfeasiblePlan(format!(
+                "{:?} turns need {} headlands at swath_width={swath_width:.2}m \
+                 (min_turning_radius={:.2}m) but only {} were requested",
+                turn.model,
+                report.required_headland_count,
+                turn.min_turning_radius,
+                report.requested_headland_count,
+            )));
+        }
+        self.field_mut()?.gen_field(
+            swath_width,
+            angle_degrees,
+            report.effective_headland_count,
+        )?;
+        Ok(report)
+    }
+
     pub fn decompose_field(&mut self, mode: DecompositionMode) -> Result<usize> {
         self.field_mut()?.decompose(mode)
     }
@@ -278,6 +334,8 @@ impl Maptrax {
         routing: RoutingOptions,
         turn: &TurnPlannerConfig,
     ) -> Result<PlannedPart> {
+        let part = self.field()?.part(part_index)?;
+        let routing = resolve_routing(routing, turn, effective_swath_width(turn, part));
         let ordered_swaths = self.plan_ordered_swaths_for_part(part_index, routing)?;
         let tour = self.build_tour(part_index, &ordered_swaths, turn)?;
         Ok(PlannedPart {
@@ -295,6 +353,7 @@ impl Maptrax {
     ) -> Result<PlannedPartStages> {
         let field = self.field()?;
         let part = field.part(part_index)?;
+        let routing = resolve_routing(routing, turn, effective_swath_width(turn, part));
         let generated_swaths = part.swaths.clone();
         let mut nety = Nety::new(&part.swaths);
         nety.field_traversal_with_options(None, routing);
@@ -370,6 +429,7 @@ impl Maptrax {
         let field = self.field()?;
         let part = field.part(options.part_index)?.clone();
         let division = Divy::plan(&part, &options.plan)?;
+        let routing = resolve_routing(routing, turn, effective_swath_width(turn, &part));
 
         let machine_count = options.plan.machine_count();
         let mut machines = Vec::with_capacity(machine_count);
@@ -411,6 +471,121 @@ impl Maptrax {
             division,
             machines,
         })
+    }
+
+    /// Validate that a built tour's connectors stay inside this part's
+    /// boundary and outside its work area (the headland-band corridor).
+    pub fn validate_part_tour(
+        &self,
+        part_index: usize,
+        tour: &[Swath],
+    ) -> Result<TourValidation> {
+        let part = self.field()?.part(part_index)?;
+        let work_area = part.headlands.last().map(|ring| &ring.polygon);
+        Ok(validate_tour(tour, &part.boundary.polygon, work_area))
+    }
+
+    /// Plan machines, then validate each machine's tour against the allowed
+    /// corridor. If any connector leaves the corridor, escalate the fallback
+    /// ladder from PLAN.md §"Turner Validation": widen the row-skip stride,
+    /// then relax the turn model (→ Reeds-Shepp → Sharper). Returns the first
+    /// fully-feasible plan, or the least-bad attempt with a diagnostic warning.
+    /// The returned warnings describe any escalation that was applied.
+    pub fn plan_machines_auto(
+        &self,
+        options: &MachinePlanningOptions,
+        routing: RoutingOptions,
+        turn: &TurnPlannerConfig,
+    ) -> Result<(PlannedMachines, Vec<String>)> {
+        let swath_width = {
+            let part = self.field()?.part(options.part_index)?;
+            effective_swath_width(turn, part)
+        };
+
+        let base_stride = match routing.strategy {
+            RoutingStrategy::SkipRows { stride } => stride.max(1),
+            RoutingStrategy::TurnRadiusAware => required_row_skip_stride(swath_width, turn),
+            _ => 1,
+        };
+        let max_stride = base_stride + 3;
+        // Try the requested model first, then progressively more flexible ones.
+        let mut models = vec![turn.model];
+        for fallback in [TurnPlannerModel::ReedsShepp, TurnPlannerModel::Sharper] {
+            if !models.contains(&fallback) {
+                models.push(fallback);
+            }
+        }
+
+        let mut warnings = Vec::new();
+        let mut best: Option<(PlannedMachines, usize)> = None;
+
+        for model in models {
+            for stride in base_stride..=max_stride {
+                let mut attempt_turn = turn.clone();
+                attempt_turn.model = model;
+                let attempt_routing = RoutingOptions {
+                    strategy: RoutingStrategy::SkipRows { stride },
+                    ..routing
+                };
+                let plan =
+                    self.plan_machines_for_part(options, attempt_routing, &attempt_turn)?;
+
+                let mut violations = 0;
+                for machine in &plan.machines {
+                    violations += self
+                        .validate_part_tour(options.part_index, &machine.tour)?
+                        .violations();
+                }
+
+                if violations == 0 {
+                    if model != turn.model || stride != base_stride {
+                        warnings.push(format!(
+                            "escalated to turn_model={model:?}, row_skip_stride={stride} \
+                             for connector feasibility"
+                        ));
+                    }
+                    return Ok((plan, warnings));
+                }
+                if best.as_ref().is_none_or(|(_, b)| violations < *b) {
+                    best = Some((plan, violations));
+                }
+            }
+        }
+
+        let (plan, violations) = best.expect("at least one attempt is always made");
+        warnings.push(format!(
+            "no fully feasible connector plan found after stride/model escalation; \
+             best attempt leaves {violations} corridor violation(s)"
+        ));
+        Ok((plan, warnings))
+    }
+}
+
+/// Swath width to size turn feasibility against: the explicit `turn.swath_width`
+/// if set, otherwise inferred from the part's generated swaths.
+fn effective_swath_width(turn: &TurnPlannerConfig, part: &Part) -> f64 {
+    if turn.swath_width > 0.0 {
+        turn.swath_width
+    } else {
+        part.swaths.first().map(|s| s.width).unwrap_or(0.0)
+    }
+}
+
+/// Resolve a `TurnRadiusAware` routing request into a concrete `SkipRows`
+/// stride derived from the turn model. Other strategies pass through.
+fn resolve_routing(
+    routing: RoutingOptions,
+    turn: &TurnPlannerConfig,
+    swath_width: f64,
+) -> RoutingOptions {
+    match routing.strategy {
+        RoutingStrategy::TurnRadiusAware => RoutingOptions {
+            strategy: RoutingStrategy::SkipRows {
+                stride: required_row_skip_stride(swath_width, turn),
+            },
+            ..routing
+        },
+        _ => routing,
     }
 }
 

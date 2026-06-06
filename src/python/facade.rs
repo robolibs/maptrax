@@ -13,11 +13,15 @@ fn py_err(err: crate::MaptraxError) -> PyErr {
     PyRuntimeError::new_err(err.to_string())
 }
 
-fn parse_routing_strategy(name: &str) -> PyResult<RoutingStrategy> {
+fn parse_routing_strategy(name: &str, stride: usize) -> PyResult<RoutingStrategy> {
     match name {
         "greedy_nearest" | "greedy" => Ok(RoutingStrategy::GreedyNearest),
         "snake" => Ok(RoutingStrategy::Snake),
         "spiral" => Ok(RoutingStrategy::Spiral),
+        "skip_rows" | "skip" => Ok(RoutingStrategy::SkipRows {
+            stride: stride.max(1),
+        }),
+        "turn_radius_aware" | "turn_aware" => Ok(RoutingStrategy::TurnRadiusAware),
         other => Err(PyValueError::new_err(format!(
             "unknown routing strategy: {other}"
         ))),
@@ -119,6 +123,37 @@ fn parse_decomposition_mode(name: &str) -> PyResult<DecompositionMode> {
             "unknown decomposition mode: {other}"
         ))),
     }
+}
+
+fn parse_headland_policy(name: &str) -> PyResult<crate::HeadlandSizingPolicy> {
+    use crate::HeadlandSizingPolicy::*;
+    match name {
+        "strict" | "strict_user" => Ok(StrictUser),
+        "warn" | "warn_only" => Ok(WarnOnly),
+        "auto" | "auto_increase" | "auto-increase" => Ok(AutoIncrease),
+        other => Err(PyValueError::new_err(format!(
+            "unknown headland policy: {other}"
+        ))),
+    }
+}
+
+fn feasibility_report_to_dict<'py>(
+    py: Python<'py>,
+    report: &crate::TurnFeasibilityReport,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("requested_headland_count", report.requested_headland_count)?;
+    dict.set_item("required_headland_count", report.required_headland_count)?;
+    dict.set_item("effective_headland_count", report.effective_headland_count)?;
+    dict.set_item("row_skip_stride", report.row_skip_stride)?;
+    dict.set_item("required_headland_depth", report.required_headland_depth)?;
+    dict.set_item(
+        "required_lateral_row_spacing",
+        report.required_lateral_row_spacing,
+    )?;
+    dict.set_item("turn_model", format!("{:?}", report.turn_model).to_lowercase())?;
+    dict.set_item("warnings", report.warnings.clone())?;
+    Ok(dict)
 }
 
 fn parse_headland_mode(name: &str, dedicated_machine: usize) -> PyResult<HeadlandMode> {
@@ -460,6 +495,95 @@ impl PyMaptrax {
             .map_err(py_err)
     }
 
+    /// Turn-feasibility report (no mutation): how many headlands the turn model
+    /// needs, what would be used under `headland_policy`
+    /// ("strict"|"warn"|"auto_increase"), the row-skip stride to recover any
+    /// shortfall, and warnings. Returns a dict.
+    #[pyo3(signature = (
+        swath_width,
+        headland_count=0,
+        turn_model="reeds_shepp",
+        min_turning_radius=2.0,
+        machine_length=6.0,
+        machine_width=3.0,
+        headland_policy="warn"
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn turn_feasibility<'py>(
+        &self,
+        py: Python<'py>,
+        swath_width: f64,
+        headland_count: usize,
+        turn_model: &str,
+        min_turning_radius: f64,
+        machine_length: f64,
+        machine_width: f64,
+        headland_policy: &str,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let turn = TurnPlannerConfig {
+            model: parse_turn_model(turn_model)?,
+            min_turning_radius,
+            machine_length,
+            machine_width,
+            swath_width,
+            ..TurnPlannerConfig::default()
+        };
+        let report = self.inner.turn_feasibility(
+            swath_width,
+            headland_count,
+            &turn,
+            parse_headland_policy(headland_policy)?,
+        );
+        feasibility_report_to_dict(py, &report)
+    }
+
+    /// Generate the field with a turn-feasibility-aware headland count under
+    /// `headland_policy`. Returns the feasibility report dict. `policy="strict"`
+    /// raises if the requested count is below what the turn model needs.
+    #[pyo3(signature = (
+        swath_width,
+        angle_degrees=0.0,
+        headland_count=0,
+        turn_model="reeds_shepp",
+        min_turning_radius=2.0,
+        machine_length=6.0,
+        machine_width=3.0,
+        headland_policy="auto_increase"
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn generate_field_feasible<'py>(
+        &mut self,
+        py: Python<'py>,
+        swath_width: f64,
+        angle_degrees: f64,
+        headland_count: usize,
+        turn_model: &str,
+        min_turning_radius: f64,
+        machine_length: f64,
+        machine_width: f64,
+        headland_policy: &str,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let turn = TurnPlannerConfig {
+            model: parse_turn_model(turn_model)?,
+            min_turning_radius,
+            machine_length,
+            machine_width,
+            swath_width,
+            ..TurnPlannerConfig::default()
+        };
+        let report = self
+            .inner
+            .generate_field_feasible(
+                swath_width,
+                angle_degrees,
+                headland_count,
+                &turn,
+                parse_headland_policy(headland_policy)?,
+            )
+            .map_err(py_err)?;
+        feasibility_report_to_dict(py, &report)
+    }
+
     /// Combined decompose + generate step. Use `decomposition="auto_split:520"`
     /// (for example) to auto-split a large field into sub-fields before
     /// generating headlands + swaths per part. Returns the number of parts.
@@ -513,7 +637,7 @@ impl PyMaptrax {
             .plan_tour_for_part(
                 part_index,
                 RoutingOptions {
-                    strategy: parse_routing_strategy(routing_strategy)?,
+                    strategy: parse_routing_strategy(routing_strategy, 1)?,
                     local_improvement_passes,
                 },
                 &TurnPlannerConfig {
@@ -553,7 +677,7 @@ impl PyMaptrax {
             .plan_ordered_swaths_for_part(
                 part_index,
                 RoutingOptions {
-                    strategy: parse_routing_strategy(routing_strategy)?,
+                    strategy: parse_routing_strategy(routing_strategy, 1)?,
                     local_improvement_passes,
                 },
             )
@@ -596,7 +720,7 @@ impl PyMaptrax {
             .plan_stages_for_part(
                 part_index,
                 RoutingOptions {
-                    strategy: parse_routing_strategy(routing_strategy)?,
+                    strategy: parse_routing_strategy(routing_strategy, 1)?,
                     local_improvement_passes,
                 },
                 &TurnPlannerConfig {
@@ -667,7 +791,7 @@ impl PyMaptrax {
             .plan_machines_for_part(
                 &MachinePlanningOptions { plan, part_index },
                 RoutingOptions {
-                    strategy: parse_routing_strategy(routing_strategy)?,
+                    strategy: parse_routing_strategy(routing_strategy, stride)?,
                     local_improvement_passes,
                 },
                 &TurnPlannerConfig {
@@ -747,7 +871,7 @@ impl PyMaptrax {
             ..TurnPlannerConfig::default()
         };
         let routing = RoutingOptions {
-            strategy: parse_routing_strategy(routing_strategy)?,
+            strategy: parse_routing_strategy(routing_strategy, stride)?,
             local_improvement_passes,
         };
         let all_plans = self

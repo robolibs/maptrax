@@ -503,22 +503,25 @@ fn tiny_headland_entry_exit_hops_do_not_create_triangle_loops() {
         },
     );
 
-    let short_connections = tour
+    // The headland connector is now a single smoothed polyline through the
+    // band (no separate tiny enter/exit hops). Assert it exists and contains no
+    // degenerate "triangle loop" — a point that doubles straight back to near
+    // where it just came from over a non-trivial step.
+    let connectors = tour
         .iter()
         .filter(|swath| swath.r#type == SwathType::Connection)
-        .filter(|swath| {
-            let dx = swath.tail().x() - swath.head().x();
-            let dy = swath.tail().y() - swath.head().y();
-            (dx * dx + dy * dy).sqrt() <= 3.0
-        })
         .collect::<Vec<_>>();
-
-    assert!(!short_connections.is_empty());
-    assert!(
-        short_connections
-            .iter()
-            .all(|swath| swath.points.len() == 2)
-    );
+    assert!(!connectors.is_empty(), "expected a connector between the rows");
+    for connector in &connectors {
+        for w in connector.points.windows(3) {
+            let step = ((w[1].x() - w[0].x()).powi(2) + (w[1].y() - w[0].y()).powi(2)).sqrt();
+            let back = ((w[2].x() - w[0].x()).powi(2) + (w[2].y() - w[0].y()).powi(2)).sqrt();
+            assert!(
+                step < 0.05 || back > 0.1 * step,
+                "connector has a triangle-loop spike"
+            );
+        }
+    }
 }
 
 #[test]
