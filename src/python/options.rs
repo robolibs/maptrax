@@ -426,6 +426,16 @@ impl PyTurnPlannerConfig {
         }
     }
 
+    fn turning_envelope_radius(&self) -> f64 {
+        let rust_cfg: mt::TurnPlannerConfig = self.into();
+        rust_cfg.turning_envelope_radius()
+    }
+
+    fn required_row_skip_stride(&self) -> usize {
+        let rust_cfg: mt::TurnPlannerConfig = self.into();
+        rust_cfg.required_row_skip_stride(rust_cfg.swath_width)
+    }
+
     pub(crate) fn __repr__(&self) -> String {
         format!(
             "TurnPlannerConfig(model={:?}, connector_mode={:?}, min_turning_radius={}, step_size={}, machine_length={}, machine_width={}, sharper_pattern={:?}, swath_width={}, headland_threshold_rows={})",

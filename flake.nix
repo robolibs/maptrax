@@ -66,6 +66,7 @@
 
         guiLibs = with pkgs; [
           alsa-lib
+          stdenv.cc.cc.lib
           udev
           vulkan-loader
           libxkbcommon
@@ -74,6 +75,7 @@
           libxcursor
           libxi
           libxrandr
+          zlib
         ];
       in
       {

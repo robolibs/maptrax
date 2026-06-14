@@ -762,6 +762,17 @@ pub extern "C" fn maptrax_plan_result_tour_view(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn maptrax_turning_envelope_radius(options: MaptraxTurnOptions) -> f64 {
+    turn_options_from_ffi(options).turning_envelope_radius()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_required_row_skip_stride(options: MaptraxTurnOptions) -> usize {
+    let cfg = turn_options_from_ffi(options);
+    cfg.required_row_skip_stride(cfg.swath_width)
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn maptrax_plan_dubins(
     start: MaptraxPose2,
     goal: MaptraxPose2,
@@ -899,6 +910,27 @@ mod tests {
 
     #[test]
     fn c_abi_turners_return_pose_buffers() {
+        let envelope = maptrax_turning_envelope_radius(MaptraxTurnOptions {
+            model: MaptraxTurnModel::ReedsShepp,
+            connector_mode: MaptraxConnectorMode::Auto,
+            min_turning_radius: 2.0,
+            step_size: 0.2,
+            machine_length: 6.0,
+            machine_width: 8.0,
+            swath_width: 10.0,
+        });
+        assert!((envelope - 5.0).abs() < 1e-9);
+        let stride = maptrax_required_row_skip_stride(MaptraxTurnOptions {
+            model: MaptraxTurnModel::Dubins,
+            connector_mode: MaptraxConnectorMode::Headland,
+            min_turning_radius: 8.0,
+            step_size: 0.2,
+            machine_length: 9.0,
+            machine_width: 4.0,
+            swath_width: 6.0,
+        });
+        assert_eq!(stride, 3);
+
         let handle = maptrax_plan_reeds_shepp(
             MaptraxPose2 {
                 x: 0.0,

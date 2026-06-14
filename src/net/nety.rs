@@ -54,7 +54,9 @@ pub enum RoutingStrategy {
     Spiral,
     /// Visit rows in modulo-`stride` groups so consecutive passes are `stride`
     /// rows apart — giving the turner more lateral room. `stride: 1` == `Snake`.
-    SkipRows { stride: usize },
+    SkipRows {
+        stride: usize,
+    },
     /// Like `SkipRows`, but the stride is derived from the turn model's
     /// required lateral row spacing. The facade resolves this to a concrete
     /// `SkipRows { stride }` before routing; if it reaches `Nety` unresolved
@@ -391,12 +393,14 @@ fn snake_indices(indices: Vec<usize>) -> Vec<usize> {
 }
 
 /// Reorder a canonical (row-sorted) index list into modulo-`stride` groups so
-/// consecutive visited rows are `stride` apart. Within a group the rows stay in
-/// canonical order; alternate groups are reversed (serpentine) to shorten the
-/// deadhead return between groups.
+/// consecutive visited rows are usually `stride` apart. Within a group the rows
+/// stay in canonical order. At group boundaries we pick the orientation that
+/// keeps the next first row at least `stride` rows away from the previous last
+/// row when possible; this avoids producing one unsafe adjacent-row transition
+/// at the seam between modulo groups.
 ///
 /// `canonical = [0,1,2,3,4,5,6,7,8,9]`, `stride = 3` →
-/// group0 `0,3,6,9`, group1 reversed `7,4,1`, group2 `2,5,8`.
+/// `0,3,6,9,1,4,7,2,5,8`.
 fn skip_row_indices(canonical: Vec<usize>, stride: usize) -> Vec<usize> {
     let stride = stride.max(1);
     if stride == 1 {
@@ -404,13 +408,41 @@ fn skip_row_indices(canonical: Vec<usize>, stride: usize) -> Vec<usize> {
     }
     let n = canonical.len();
     let mut out = Vec::with_capacity(n);
-    for (group, offset) in (0..stride).enumerate() {
-        let mut rows: Vec<usize> = (offset..n).step_by(stride).map(|k| canonical[k]).collect();
-        if group % 2 == 1 {
-            rows.reverse();
+    let mut previous_position: Option<usize> = None;
+
+    for offset in 0..stride {
+        let positions: Vec<usize> = (offset..n).step_by(stride).collect();
+        if positions.is_empty() {
+            continue;
         }
-        out.extend(rows);
+
+        let reverse = previous_position.is_some_and(|prev| {
+            let forward_first = positions[0];
+            let reverse_first = *positions.last().unwrap();
+            let forward_gap = prev.abs_diff(forward_first);
+            let reverse_gap = prev.abs_diff(reverse_first);
+
+            match (forward_gap >= stride, reverse_gap >= stride) {
+                (true, false) => false,
+                (false, true) => true,
+                (true, true) => reverse_gap < forward_gap,
+                (false, false) => reverse_gap > forward_gap,
+            }
+        });
+
+        if reverse {
+            for position in positions.into_iter().rev() {
+                previous_position = Some(position);
+                out.push(canonical[position]);
+            }
+        } else {
+            for position in positions {
+                previous_position = Some(position);
+                out.push(canonical[position]);
+            }
+        }
     }
+
     out
 }
 
@@ -520,10 +552,12 @@ mod skip_row_tests {
     }
 
     #[test]
-    fn stride_three_groups_with_serpentine() {
-        // groups: [0,3,6,9], reversed [7,4,1], [2,5,8]
+    fn stride_three_groups_avoids_adjacent_group_seams() {
+        // groups: [0,3,6,9], [1,4,7], [2,5,8]
+        // The old serpentine seam ended [7,4,1] -> [2,5,8], producing
+        // adjacent rows 1 -> 2 at the group boundary.
         let out = skip_row_indices(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 3);
-        assert_eq!(out, vec![0, 3, 6, 9, 7, 4, 1, 2, 5, 8]);
+        assert_eq!(out, vec![0, 3, 6, 9, 1, 4, 7, 2, 5, 8]);
     }
 
     #[test]

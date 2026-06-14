@@ -175,6 +175,10 @@ MaptraxSwathBufferView maptrax_stages_result_tour_view(const MaptraxStagesResult
 
 MaptraxSwathBufferView maptrax_plan_result_tour_view(const MaptraxPlanResult *result);
 
+double maptrax_turning_envelope_radius(MaptraxTurnOptions options);
+
+uintptr_t maptrax_required_row_skip_stride(MaptraxTurnOptions options);
+
 MaptraxPosePath *maptrax_plan_dubins(MaptraxPose2 start,
                                      MaptraxPose2 goal,
                                      double min_turning_radius,

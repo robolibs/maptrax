@@ -16,7 +16,7 @@ endif
 VENV := .venv
 VENV_PYTHON := $(CURDIR)/$(VENV)/bin/python
 
-.PHONY: all develop basic turners rerun main \
+.PHONY: all develop basic turners rerun main combine-square-turning combine-irregular-turning \
         machine-stripe machine-block machine-optimized machine-fairness machine-split \
         clean
 
@@ -41,6 +41,14 @@ rerun: develop
 main: develop
 	@$(VENV_PYTHON) -m pip install rerun-sdk
 	@$(VENV_PYTHON) main.py
+
+combine-square-turning: develop
+	@if [ "$$MAPTRAX_NO_RERUN" != "1" ]; then $(VENV_PYTHON) -m pip install rerun-sdk; fi
+	@$(VENV_PYTHON) combine_square_turning.py
+
+combine-irregular-turning: develop
+	@if [ "$$MAPTRAX_NO_RERUN" != "1" ]; then $(VENV_PYTHON) -m pip install rerun-sdk; fi
+	@$(VENV_PYTHON) combine_irregular_turning.py
 
 machine-stripe: develop
 	@$(VENV_PYTHON) -m pip install rerun-sdk

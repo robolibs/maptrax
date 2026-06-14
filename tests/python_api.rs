@@ -138,5 +138,40 @@ fn python_module_exposes_maptrax_planning_surface() {
             .expect("list");
         assert!(dubins_paths.len() > 0);
         assert!(reeds_paths.len() > 0);
+
+        let turn_cls = module.getattr("TurnPlannerConfig").expect("turn config");
+        let turn_kwargs = PyDict::new(py);
+        turn_kwargs
+            .set_item("machine_length", 6.0_f64)
+            .expect("set length");
+        turn_kwargs
+            .set_item("machine_width", 8.0_f64)
+            .expect("set width");
+        let turn_cfg = turn_cls.call((), Some(&turn_kwargs)).expect("turn cfg");
+        let envelope: f64 = turn_cfg
+            .call_method0("turning_envelope_radius")
+            .expect("turning envelope")
+            .extract()
+            .expect("extract");
+        assert!((envelope - 5.0).abs() < 1e-9);
+
+        let stride_kwargs = PyDict::new(py);
+        let turn_model = module.getattr("TurnPlannerModel").expect("turn model");
+        stride_kwargs
+            .set_item("model", turn_model.getattr("DUBINS").expect("dubins"))
+            .expect("set model");
+        stride_kwargs
+            .set_item("min_turning_radius", 8.0_f64)
+            .expect("set radius");
+        stride_kwargs
+            .set_item("swath_width", 6.0_f64)
+            .expect("set swath width");
+        let stride_cfg = turn_cls.call((), Some(&stride_kwargs)).expect("stride cfg");
+        let stride: usize = stride_cfg
+            .call_method0("required_row_skip_stride")
+            .expect("row skip stride")
+            .extract()
+            .expect("extract stride");
+        assert_eq!(stride, 3);
     });
 }

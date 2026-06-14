@@ -208,8 +208,7 @@ impl Maptrax {
         turn: &TurnPlannerConfig,
         policy: HeadlandSizingPolicy,
     ) -> Result<TurnFeasibilityReport> {
-        let report =
-            turn_feasibility_report(swath_width, requested_headland_count, turn, policy);
+        let report = turn_feasibility_report(swath_width, requested_headland_count, turn, policy);
         if policy == HeadlandSizingPolicy::StrictUser
             && report.requested_headland_count < report.required_headland_count
         {
@@ -222,11 +221,8 @@ impl Maptrax {
                 report.requested_headland_count,
             )));
         }
-        self.field_mut()?.gen_field(
-            swath_width,
-            angle_degrees,
-            report.effective_headland_count,
-        )?;
+        self.field_mut()?
+            .gen_field(swath_width, angle_degrees, report.effective_headland_count)?;
         Ok(report)
     }
 
@@ -473,16 +469,21 @@ impl Maptrax {
         })
     }
 
-    /// Validate that a built tour's connectors stay inside this part's
-    /// boundary and outside its work area (the headland-band corridor).
-    pub fn validate_part_tour(
-        &self,
-        part_index: usize,
-        tour: &[Swath],
-    ) -> Result<TourValidation> {
+    /// Validate that a built tour's connectors stay inside this part's safe
+    /// turn corridor and outside its work area. With headlands present, the
+    /// outer safe boundary is the first headland ring — not the field border —
+    /// so the border-to-first-headland strip remains a no-turn danger zone.
+    pub fn validate_part_tour(&self, part_index: usize, tour: &[Swath]) -> Result<TourValidation> {
         let part = self.field()?.part(part_index)?;
-        let work_area = part.headlands.last().map(|ring| &ring.polygon);
-        Ok(validate_tour(tour, &part.boundary.polygon, work_area))
+        let work_area = (part.headlands.len() >= 2)
+            .then(|| part.headlands.last().map(|ring| &ring.polygon))
+            .flatten();
+        let outer_boundary = part
+            .headlands
+            .first()
+            .map(|ring| &ring.polygon)
+            .unwrap_or(&part.boundary.polygon);
+        Ok(validate_tour(tour, outer_boundary, work_area))
     }
 
     /// Plan machines, then validate each machine's tour against the allowed
@@ -527,8 +528,7 @@ impl Maptrax {
                     strategy: RoutingStrategy::SkipRows { stride },
                     ..routing
                 };
-                let plan =
-                    self.plan_machines_for_part(options, attempt_routing, &attempt_turn)?;
+                let plan = self.plan_machines_for_part(options, attempt_routing, &attempt_turn)?;
 
                 let mut violations = 0;
                 for machine in &plan.machines {
