@@ -96,6 +96,22 @@ cd examples/c_abi
 make
 ```
 
+### Python feature split
+
+Two features, because pyo3 cannot serve both jobs at once:
+
+| feature | pyo3 link mode | use |
+|---|---|---|
+| `python` | links `libpython` | `cargo test --features python` runs the bindings in-process |
+| `python-extension` | `extension-module` — host interpreter resolves symbols | what maturin builds and ships |
+
+`python-extension` implies `python`. A test binary cannot link an
+`extension-module` build, so `tests/python_api.rs` and
+`tests/python_geojson.rs` compile out when it is enabled — which keeps
+`cargo test --all-features` working. `pyproject.toml` and both makefiles
+already select `python-extension`; the dev shell exports `PYO3_PYTHON` and puts
+libpython on `LD_LIBRARY_PATH` so the linked tests run.
+
 Python surface:
 
 - Python module implementation: [`src/python/`](src/python)
@@ -115,6 +131,107 @@ make main
 ```
 
 The Python example makefile uses `PYO3_PYTHON` from the flake shell, creates a local `.venv`, and installs the extension into that environment so `pyo3`, `maturin`, and the runtime interpreter stay aligned.
+
+## GeoJSON Export
+
+Behind the optional `geojson` feature, plans are written as GeoJSON through the
+sibling [`vectory`](https://codeberg.org/robolibs/vectory) crate. Maptrax plans
+in local ENU metres; `vectory` handles the encoding and the ENU to WGS84
+conversion through the field datum.
+
+```toml
+[dependencies]
+maptrax = { path = "../maptrax", features = ["geojson"] }
+```
+
+```rust
+use maptrax::{GeoJsonOptions, Maptrax, PlannerOptions};
+
+# let mut planner = Maptrax::new();
+# let options = PlannerOptions::default();
+let planned = planner.plan_all(&options)?;
+
+// Longitude/latitude by default.
+planner.export_planned_geojson(&planned, "plan.geojson", &GeoJsonOptions::default())?;
+
+// Border and headlands only, in raw local metres.
+planner.export_geojson("field.geojson", &GeoJsonOptions::geometry_only().in_enu())?;
+# Ok::<(), maptrax::MaptraxError>(())
+```
+
+Facade methods:
+
+- `to_vector` — build a `vectory::Vector` without writing it
+- `export_geojson` — field border, parts, headlands and rows
+- `export_planned_geojson` — adds ordered rows and the drive path
+- `export_machines_geojson` — adds per-machine rows, headland arcs and tours
+
+Every feature carries a `type` property naming its layer:
+
+| `type`          | geometry     | emitted for                            |
+|-----------------|--------------|----------------------------------------|
+| `field`         | `Polygon`    | the field border                       |
+| `part_boundary` | `Polygon`    | each decomposed part                   |
+| `headland`      | `Polygon`    | each headland ring                     |
+| `swath`         | `LineString` | work rows, with an `order` property    |
+| `tour`          | `LineString` | a full drive path, connectors included |
+| `headland_arc`  | `LineString` | per-machine headland assignments       |
+
+Machine-owned features additionally carry a `machine` property. Run the demo
+with `cargo run --features geojson --example geojson_export`.
+
+Each `export_*` method has a `*_to_geojson` counterpart returning the document
+as a `String` instead of writing it — `to_geojson`, `planned_to_geojson`,
+`machines_to_geojson`.
+
+### From C
+
+The C declarations are guarded by `MAPTRAX_GEOJSON`, since they only exist in a
+library built with the feature. Build with `make -C examples/c_abi run
+GEOJSON=1`, or by hand with `cargo build --features geojson` and
+`cc -DMAPTRAX_GEOJSON ...`.
+
+```c
+MaptraxGeoJsonOptions geo = maptrax_geojson_options_default();
+
+if (!maptrax_planner_export_geojson(planner, "field.geojson", geo)) {
+  fprintf(stderr, "%s\n", maptrax_last_error_message());
+}
+
+char* text = maptrax_planner_to_geojson(planner, geo);   /* NULL on failure */
+printf("%s\n", text);
+maptrax_string_free(text);                               /* caller owns it */
+```
+
+`maptrax_planner_export_planned_geojson` and
+`maptrax_planner_planned_to_geojson` take routing and turn options, plan the
+part, and include the ordered rows and drive path.
+
+### From Python
+
+The extension is built with `--features python,geojson` (already wired into
+`pyproject.toml` and both makefiles).
+
+```python
+import maptrax
+
+mt = maptrax.Maptrax()
+mt.set_field([(0, 0), (200, 0), (200, 100), (0, 100)], (51.0, 5.0, 0.0))
+mt.generate_field(10.0, 90.0, 2)
+
+text = mt.to_geojson()                      # str, WGS84
+mt.export_geojson("field.geojson")
+mt.export_geojson("local.geojson", crs="enu", swaths=False)
+
+# Planned and multi-machine variants take a PlannerOptions.
+plan = maptrax.DivisionPlan.uniform(3)
+options = maptrax.PlannerOptions(machines=maptrax.MachinePlanningOptions(plan=plan))
+mt.export_machines_geojson("machines.geojson", options=options)
+```
+
+`crs` accepts `"wgs"`/`"wgs84"`/`"epsg:4326"` or `"enu"`/`"local"`; anything
+else raises `ValueError`. The layer toggles are the keyword arguments
+`part_boundaries`, `headlands`, `swaths` and `tours`.
 
 ## Staged Planning
 

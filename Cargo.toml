@@ -1,6 +1,6 @@
 [package]
 name = "maptrax"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Rust agricultural field planning library translated from farmtrax"
 license = "MIT"
@@ -12,16 +12,27 @@ crate-type = ["rlib", "cdylib"]
 
 [features]
 default = []
-python = ["dep:pyo3"]
+# Python bindings linked against libpython, so `cargo test --features python`
+# can build a test binary and drive the module in-process.
+python = ["dep:pyo3", "pyo3/auto-initialize"]
+# What maturin builds: a loadable extension module that resolves Python symbols
+# from the host interpreter instead of linking libpython. Test binaries cannot
+# link this, which is why it is not folded into `python`.
+python-extension = ["python", "pyo3/extension-module"]
+# GeoJSON import/export through the sibling `vectory` crate.
+geojson = ["dep:vectory"]
+
+[[example]]
+name = "geojson_export"
+path = "examples/geojson_export.rs"
+required-features = ["geojson"]
 
 [dependencies]
-datapod = { git = "https://codeberg.org/robolibs/datapod.git", tag = "0.4.0" }
-concord = { git = "https://codeberg.org/robolibs/concord.git", tag = "0.1.1" }
-graphix = { git = "https://codeberg.org/robolibs/graphix.git", tag = "0.1.1" }
-pyo3 = { version = "0.23", optional = true, features = [
-    "abi3-py39",
-    "extension-module",
-] }
+datapod = { git = "https://codeberg.org/robolibs/datapod.git", tag = "0.4.1" }
+concord = { git = "https://codeberg.org/robolibs/concord.git", tag = "0.1.2" }
+graphix = { git = "https://codeberg.org/robolibs/graphix.git", tag = "0.1.2" }
+vectory = { git = "https://codeberg.org/robolibs/vectory.git", tag = "0.1.2", optional = true }
+pyo3 = { version = "0.23", optional = true, features = ["abi3-py39"] }
 
 [dev-dependencies]
 rerun = { version = "0.31.2", default-features = false, features = ["sdk", "server"] }

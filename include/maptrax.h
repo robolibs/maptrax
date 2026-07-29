@@ -35,6 +35,22 @@ typedef enum {
   MAPTRAX_SWATH_KIND_MAPTRAX_SWATH_KIND_HEADLAND = 3,
 } MaptraxSwathKind;
 
+#if defined(MAPTRAX_GEOJSON)
+/**
+ * Coordinate reference system for GeoJSON output.
+ */
+typedef enum {
+  /**
+   * Longitude/latitude, converted through the field datum.
+   */
+  MAPTRAX_CRS_MAPTRAX_CRS_WGS = 0,
+  /**
+   * Raw local ENU metres.
+   */
+  MAPTRAX_CRS_MAPTRAX_CRS_ENU = 1,
+} MaptraxCrs;
+#endif
+
 typedef struct MaptraxPartSnapshot MaptraxPartSnapshot;
 
 typedef struct MaptraxPlanResult MaptraxPlanResult;
@@ -103,6 +119,20 @@ typedef struct {
   const MaptraxCoord2 *points;
   uintptr_t points_len;
 } MaptraxRingBufferView;
+
+#if defined(MAPTRAX_GEOJSON)
+/**
+ * Which layers a GeoJSON export contains. Build one with
+ * `maptrax_geojson_options_default()` and override what you need.
+ */
+typedef struct {
+  bool include_part_boundaries;
+  bool include_headlands;
+  bool include_swaths;
+  bool include_tours;
+  MaptraxCrs crs;
+} MaptraxGeoJsonOptions;
+#endif
 
 typedef struct {
   double x;
@@ -174,6 +204,63 @@ MaptraxSwathBufferView maptrax_stages_result_ordered_view(const MaptraxStagesRes
 MaptraxSwathBufferView maptrax_stages_result_tour_view(const MaptraxStagesResult *result);
 
 MaptraxSwathBufferView maptrax_plan_result_tour_view(const MaptraxPlanResult *result);
+
+#if defined(MAPTRAX_GEOJSON)
+/**
+ * Every layer on, WGS84 output.
+ */
+MaptraxGeoJsonOptions maptrax_geojson_options_default(void);
+#endif
+
+#if defined(MAPTRAX_GEOJSON)
+/**
+ * Write the field geometry to `path` as GeoJSON. Returns false and sets the
+ * last-error message on failure.
+ */
+bool maptrax_planner_export_geojson(const MaptraxPlanner *planner,
+                                    const char *path,
+                                    MaptraxGeoJsonOptions options);
+#endif
+
+#if defined(MAPTRAX_GEOJSON)
+/**
+ * Plan `part_index`, then write the field geometry plus the ordered rows and
+ * drive path to `path`.
+ */
+bool maptrax_planner_export_planned_geojson(const MaptraxPlanner *planner,
+                                            uintptr_t part_index,
+                                            MaptraxRoutingOptions routing,
+                                            MaptraxTurnOptions turn,
+                                            const char *path,
+                                            MaptraxGeoJsonOptions options);
+#endif
+
+#if defined(MAPTRAX_GEOJSON)
+/**
+ * The field geometry as a GeoJSON string. Returns NULL on failure. The caller
+ * owns the returned buffer and must release it with `maptrax_string_free`.
+ */
+char *maptrax_planner_to_geojson(const MaptraxPlanner *planner, MaptraxGeoJsonOptions options);
+#endif
+
+#if defined(MAPTRAX_GEOJSON)
+/**
+ * Plan `part_index` and return the whole plan as a GeoJSON string. Returns
+ * NULL on failure; release with `maptrax_string_free`.
+ */
+char *maptrax_planner_planned_to_geojson(const MaptraxPlanner *planner,
+                                         uintptr_t part_index,
+                                         MaptraxRoutingOptions routing,
+                                         MaptraxTurnOptions turn,
+                                         MaptraxGeoJsonOptions options);
+#endif
+
+#if defined(MAPTRAX_GEOJSON)
+/**
+ * Release a string returned by one of the `*_to_geojson` calls.
+ */
+void maptrax_string_free(char *text);
+#endif
 
 double maptrax_turning_envelope_radius(MaptraxTurnOptions options);
 

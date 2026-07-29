@@ -1,4 +1,6 @@
-#![cfg(feature = "python")]
+// The extension-module build resolves Python symbols from the host
+// interpreter, so a test binary cannot link it. Skip there.
+#![cfg(all(feature = "python", not(feature = "python-extension")))]
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};

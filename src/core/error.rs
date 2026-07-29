@@ -11,6 +11,8 @@ pub enum MaptraxError {
     /// A requested plan cannot satisfy turn-feasibility constraints (e.g. too
     /// few headlands for the turn model under `StrictUser` policy).
     InfeasiblePlan(String),
+    /// Serializing or writing an export (e.g. GeoJSON) failed.
+    Export(String),
 }
 
 impl Display for MaptraxError {
@@ -22,6 +24,7 @@ impl Display for MaptraxError {
             Self::MissingPart(index) => write!(f, "part index {index} is out of bounds"),
             Self::MissingField => write!(f, "field has not been set"),
             Self::InfeasiblePlan(message) => write!(f, "infeasible plan: {message}"),
+            Self::Export(message) => write!(f, "export failed: {message}"),
         }
     }
 }

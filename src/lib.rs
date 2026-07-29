@@ -13,6 +13,8 @@
 
 pub mod core;
 pub mod division;
+#[cfg(feature = "geojson")]
+pub mod export;
 pub mod facade;
 pub mod ffi;
 pub mod field;
@@ -32,6 +34,11 @@ pub use datapod::Geo;
 pub use division::{
     Balance, DivisionPattern, DivisionPlan, DivisionResult, Divy, HeadlandArc, HeadlandMode,
     MachineProfile, OptimizeObjective,
+};
+#[cfg(feature = "geojson")]
+pub use export::{
+    Crs, Element, GeoJsonOptions, Geometry, Vector, field_to_vector, planned_field_to_vector,
+    planned_machines_to_vector, planned_stages_to_vector, to_json_string, write_vector,
 };
 pub use facade::{
     FieldGenerationMode, FieldGenerationOptions, MachinePlannedPart, MachinePlanningOptions,

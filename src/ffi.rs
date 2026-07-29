@@ -217,6 +217,38 @@ fn bool_result<T>(result: crate::Result<T>) -> bool {
     }
 }
 
+/// Hand a `String` back to C as an owned buffer, or NULL with the reason in
+/// the last-error slot. Free with `maptrax_string_free`.
+#[cfg(feature = "geojson")]
+fn string_result(result: crate::Result<String>) -> *mut c_char {
+    match result.and_then(|text| {
+        CString::new(text).map_err(|_| {
+            crate::MaptraxError::Export("exported document contains an interior NUL".into())
+        })
+    }) {
+        Ok(text) => {
+            clear_last_error();
+            text.into_raw()
+        }
+        Err(err) => {
+            set_last_error(err.to_string());
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Borrow a NUL-terminated path from C. Rejects NULL and non-UTF-8.
+#[cfg(feature = "geojson")]
+fn path_from_raw<'a>(path: *const c_char) -> crate::Result<&'a str> {
+    if path.is_null() {
+        return Err(crate::MaptraxError::Export("null path pointer".into()));
+    }
+    // SAFETY: validated non-null above; caller promises NUL termination.
+    unsafe { CStr::from_ptr(path) }
+        .to_str()
+        .map_err(|_| crate::MaptraxError::Export("path is not valid UTF-8".into()))
+}
+
 fn planner_from_ptr_mut<'a>(planner: *mut MaptraxPlanner) -> crate::Result<&'a mut MaptraxPlanner> {
     if planner.is_null() {
         return Err(crate::MaptraxError::InvalidPolygon("null planner handle"));
@@ -761,6 +793,166 @@ pub extern "C" fn maptrax_plan_result_tour_view(
     swath_buffer_view(unsafe { &(*result).tour })
 }
 
+/// Coordinate reference system for GeoJSON output.
+#[cfg(feature = "geojson")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MaptraxCrs {
+    /// Longitude/latitude, converted through the field datum.
+    Wgs = 0,
+    /// Raw local ENU metres.
+    Enu = 1,
+}
+
+/// Which layers a GeoJSON export contains. Build one with
+/// `maptrax_geojson_options_default()` and override what you need.
+#[cfg(feature = "geojson")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MaptraxGeoJsonOptions {
+    pub include_part_boundaries: bool,
+    pub include_headlands: bool,
+    pub include_swaths: bool,
+    pub include_tours: bool,
+    pub crs: MaptraxCrs,
+}
+
+#[cfg(feature = "geojson")]
+fn geojson_options_from_ffi(options: MaptraxGeoJsonOptions) -> crate::export::GeoJsonOptions {
+    crate::export::GeoJsonOptions {
+        include_part_boundaries: options.include_part_boundaries,
+        include_headlands: options.include_headlands,
+        include_swaths: options.include_swaths,
+        include_tours: options.include_tours,
+        crs: match options.crs {
+            MaptraxCrs::Wgs => crate::export::Crs::Wgs,
+            MaptraxCrs::Enu => crate::export::Crs::Enu,
+        },
+    }
+}
+
+/// Every layer on, WGS84 output.
+#[cfg(feature = "geojson")]
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_geojson_options_default() -> MaptraxGeoJsonOptions {
+    MaptraxGeoJsonOptions {
+        include_part_boundaries: true,
+        include_headlands: true,
+        include_swaths: true,
+        include_tours: true,
+        crs: MaptraxCrs::Wgs,
+    }
+}
+
+/// Write the field geometry to `path` as GeoJSON. Returns false and sets the
+/// last-error message on failure.
+#[cfg(feature = "geojson")]
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_planner_export_geojson(
+    planner: *const MaptraxPlanner,
+    path: *const c_char,
+    options: MaptraxGeoJsonOptions,
+) -> bool {
+    let result = (|| {
+        let planner = planner_from_ptr(planner)?;
+        let path = path_from_raw(path)?;
+        planner
+            .planner
+            .export_geojson(path, &geojson_options_from_ffi(options))
+    })();
+    bool_result(result)
+}
+
+/// Plan `part_index`, then write the field geometry plus the ordered rows and
+/// drive path to `path`.
+#[cfg(feature = "geojson")]
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_planner_export_planned_geojson(
+    planner: *const MaptraxPlanner,
+    part_index: usize,
+    routing: MaptraxRoutingOptions,
+    turn: MaptraxTurnOptions,
+    path: *const c_char,
+    options: MaptraxGeoJsonOptions,
+) -> bool {
+    let result = (|| {
+        let planner = planner_from_ptr(planner)?;
+        let path = path_from_raw(path)?;
+        let planned = planner.planner.plan_tour_for_part(
+            part_index,
+            routing_options_from_ffi(routing),
+            &turn_options_from_ffi(turn),
+        )?;
+        let field = crate::PlannedField {
+            objective_results: Vec::new(),
+            parts: vec![planned],
+        };
+        planner
+            .planner
+            .export_planned_geojson(&field, path, &geojson_options_from_ffi(options))
+    })();
+    bool_result(result)
+}
+
+/// The field geometry as a GeoJSON string. Returns NULL on failure. The caller
+/// owns the returned buffer and must release it with `maptrax_string_free`.
+#[cfg(feature = "geojson")]
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_planner_to_geojson(
+    planner: *const MaptraxPlanner,
+    options: MaptraxGeoJsonOptions,
+) -> *mut c_char {
+    let result = (|| {
+        let planner = planner_from_ptr(planner)?;
+        planner
+            .planner
+            .to_geojson(&geojson_options_from_ffi(options))
+    })();
+    string_result(result)
+}
+
+/// Plan `part_index` and return the whole plan as a GeoJSON string. Returns
+/// NULL on failure; release with `maptrax_string_free`.
+#[cfg(feature = "geojson")]
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_planner_planned_to_geojson(
+    planner: *const MaptraxPlanner,
+    part_index: usize,
+    routing: MaptraxRoutingOptions,
+    turn: MaptraxTurnOptions,
+    options: MaptraxGeoJsonOptions,
+) -> *mut c_char {
+    let result = (|| {
+        let planner = planner_from_ptr(planner)?;
+        let planned = planner.planner.plan_tour_for_part(
+            part_index,
+            routing_options_from_ffi(routing),
+            &turn_options_from_ffi(turn),
+        )?;
+        let field = crate::PlannedField {
+            objective_results: Vec::new(),
+            parts: vec![planned],
+        };
+        planner
+            .planner
+            .planned_to_geojson(&field, &geojson_options_from_ffi(options))
+    })();
+    string_result(result)
+}
+
+/// Release a string returned by one of the `*_to_geojson` calls.
+#[cfg(feature = "geojson")]
+#[unsafe(no_mangle)]
+pub extern "C" fn maptrax_string_free(text: *mut c_char) {
+    if text.is_null() {
+        return;
+    }
+    // SAFETY: pointer originated from CString::into_raw in string_result.
+    unsafe {
+        drop(CString::from_raw(text));
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn maptrax_turning_envelope_radius(options: MaptraxTurnOptions) -> f64 {
     turn_options_from_ffi(options).turning_envelope_radius()
@@ -1058,6 +1250,174 @@ mod tests {
         assert!(swaths.swaths_len > 0);
 
         maptrax_part_snapshot_free(snapshot);
+        maptrax_planner_free(planner);
+    }
+
+    #[cfg(feature = "geojson")]
+    fn geojson_test_planner() -> *mut MaptraxPlanner {
+        let planner = maptrax_planner_new();
+        let border = [
+            MaptraxCoord2 { x: 0.0, y: 0.0 },
+            MaptraxCoord2 { x: 200.0, y: 0.0 },
+            MaptraxCoord2 { x: 200.0, y: 100.0 },
+            MaptraxCoord2 { x: 0.0, y: 100.0 },
+        ];
+        assert!(maptrax_planner_set_field(
+            planner,
+            border.as_ptr(),
+            border.len(),
+            MaptraxGeo3 {
+                latitude: 51.0,
+                longitude: 5.0,
+                altitude: 0.0,
+            },
+        ));
+        assert!(maptrax_planner_generate_field(
+            planner,
+            MaptraxFieldOptions {
+                swath_width: 10.0,
+                angle_degrees: 90.0,
+                headland_count: 2,
+            },
+        ));
+        planner
+    }
+
+    #[cfg(feature = "geojson")]
+    fn take_c_string(ptr: *mut c_char) -> String {
+        assert!(!ptr.is_null(), "expected a string, got NULL");
+        // SAFETY: ptr came from string_result, which hands over a CString.
+        let text = unsafe { CStr::from_ptr(ptr) }
+            .to_str()
+            .expect("utf-8")
+            .to_string();
+        maptrax_string_free(ptr);
+        text
+    }
+
+    #[test]
+    #[cfg(feature = "geojson")]
+    fn c_abi_exports_geojson_string() {
+        let planner = geojson_test_planner();
+        let text = take_c_string(maptrax_planner_to_geojson(
+            planner,
+            maptrax_geojson_options_default(),
+        ));
+
+        assert!(text.contains("\"FeatureCollection\""));
+        assert!(text.contains("\"crs\":\"EPSG:4326\""));
+        assert!(text.contains("\"type\":\"headland\""));
+
+        maptrax_planner_free(planner);
+    }
+
+    #[test]
+    #[cfg(feature = "geojson")]
+    fn c_abi_planned_export_includes_the_tour() {
+        let planner = geojson_test_planner();
+        let text = take_c_string(maptrax_planner_planned_to_geojson(
+            planner,
+            0,
+            MaptraxRoutingOptions {
+                strategy: MaptraxRoutingStrategy::Snake,
+                local_improvement_passes: 0,
+            },
+            default_turn_options(),
+            maptrax_geojson_options_default(),
+        ));
+
+        assert!(text.contains("\"type\":\"tour\""));
+        assert!(text.contains("\"order\":"));
+
+        maptrax_planner_free(planner);
+    }
+
+    #[cfg(feature = "geojson")]
+    fn default_turn_options() -> MaptraxTurnOptions {
+        MaptraxTurnOptions {
+            model: MaptraxTurnModel::ReedsShepp,
+            connector_mode: MaptraxConnectorMode::Headland,
+            min_turning_radius: 4.0,
+            step_size: 0.5,
+            machine_length: 6.0,
+            machine_width: 3.0,
+            swath_width: 10.0,
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "geojson")]
+    fn c_abi_writes_a_geojson_file() {
+        let planner = geojson_test_planner();
+        let path = std::env::temp_dir().join("maptrax_c_abi_export.geojson");
+        let _ = std::fs::remove_file(&path);
+        let c_path = CString::new(path.to_str().expect("utf-8")).expect("cstring");
+
+        assert!(maptrax_planner_export_geojson(
+            planner,
+            c_path.as_ptr(),
+            maptrax_geojson_options_default(),
+        ));
+
+        let text = std::fs::read_to_string(&path).expect("written file");
+        assert!(text.contains("\"FeatureCollection\""));
+
+        let _ = std::fs::remove_file(&path);
+        maptrax_planner_free(planner);
+    }
+
+    #[test]
+    #[cfg(feature = "geojson")]
+    fn c_abi_export_failure_sets_last_error_and_returns_false() {
+        let planner = geojson_test_planner();
+        let c_path = CString::new("/nonexistent-dir-maptrax/out.geojson").expect("cstring");
+
+        assert!(!maptrax_planner_export_geojson(
+            planner,
+            c_path.as_ptr(),
+            maptrax_geojson_options_default(),
+        ));
+
+        let message = maptrax_last_error_message();
+        assert!(!message.is_null(), "failure must set the last-error slot");
+        // SAFETY: non-null checked; the slot owns the CString.
+        let message = unsafe { CStr::from_ptr(message) }.to_str().expect("utf-8");
+        assert!(message.contains("export failed"), "got: {message}");
+
+        maptrax_planner_free(planner);
+    }
+
+    #[test]
+    #[cfg(feature = "geojson")]
+    fn c_abi_null_path_is_rejected() {
+        let planner = geojson_test_planner();
+        assert!(!maptrax_planner_export_geojson(
+            planner,
+            ptr::null(),
+            maptrax_geojson_options_default(),
+        ));
+        maptrax_planner_free(planner);
+    }
+
+    #[test]
+    #[cfg(feature = "geojson")]
+    fn c_abi_null_planner_returns_null_string() {
+        let text = maptrax_planner_to_geojson(ptr::null(), maptrax_geojson_options_default());
+        assert!(text.is_null());
+    }
+
+    #[test]
+    #[cfg(feature = "geojson")]
+    fn c_abi_enu_crs_option_is_honoured() {
+        let planner = geojson_test_planner();
+        let mut options = maptrax_geojson_options_default();
+        options.crs = MaptraxCrs::Enu;
+        options.include_swaths = false;
+
+        let text = take_c_string(maptrax_planner_to_geojson(planner, options));
+        assert!(text.contains("\"crs\":\"ENU\""));
+        assert!(!text.contains("\"type\":\"swath\""));
+
         maptrax_planner_free(planner);
     }
 }
