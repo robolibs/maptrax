@@ -13,6 +13,41 @@ fn py_err(err: crate::MaptraxError) -> PyErr {
     PyRuntimeError::new_err(err.to_string())
 }
 
+#[cfg(feature = "geojson")]
+fn parse_crs(name: &str) -> PyResult<crate::export::Crs> {
+    match name {
+        "wgs" | "wgs84" | "epsg:4326" | "4326" => Ok(crate::export::Crs::Wgs),
+        "enu" | "local" => Ok(crate::export::Crs::Enu),
+        other => Err(PyValueError::new_err(format!("unknown crs: {other}"))),
+    }
+}
+
+#[cfg(feature = "geojson")]
+fn geojson_options(
+    crs: &str,
+    include_part_boundaries: bool,
+    include_headlands: bool,
+    include_swaths: bool,
+    include_tours: bool,
+) -> PyResult<crate::export::GeoJsonOptions> {
+    Ok(crate::export::GeoJsonOptions {
+        include_part_boundaries,
+        include_headlands,
+        include_swaths,
+        include_tours,
+        crs: parse_crs(crs)?,
+    })
+}
+
+#[cfg(feature = "geojson")]
+fn planner_options_or_default(
+    options: Option<&crate::python::options::PyPlannerOptions>,
+) -> crate::PlannerOptions {
+    options
+        .map(Into::into)
+        .unwrap_or_else(crate::PlannerOptions::default)
+}
+
 fn parse_routing_strategy(name: &str, stride: usize) -> PyResult<RoutingStrategy> {
     match name {
         "greedy_nearest" | "greedy" => Ok(RoutingStrategy::GreedyNearest),
@@ -1001,6 +1036,145 @@ impl PyMaptrax {
             pattern,
         );
         pose_path_to_dict(py, &path.pattern_name, path.total_length, &path.waypoints)
+    }
+
+    /// Write the field geometry (border, parts, headlands, rows) to `path`
+    /// as GeoJSON. `crs` is "wgs" (longitude/latitude, the default) or "enu"
+    /// (raw local metres).
+    #[cfg(feature = "geojson")]
+    #[pyo3(signature = (
+        path,
+        crs="wgs",
+        part_boundaries=true,
+        headlands=true,
+        swaths=true
+    ))]
+    fn export_geojson(
+        &self,
+        path: &str,
+        crs: &str,
+        part_boundaries: bool,
+        headlands: bool,
+        swaths: bool,
+    ) -> PyResult<()> {
+        let options = geojson_options(crs, part_boundaries, headlands, swaths, false)?;
+        self.inner.export_geojson(path, &options).map_err(py_err)
+    }
+
+    /// The field geometry as a GeoJSON string.
+    #[cfg(feature = "geojson")]
+    #[pyo3(signature = (crs="wgs", part_boundaries=true, headlands=true, swaths=true))]
+    fn to_geojson(
+        &self,
+        crs: &str,
+        part_boundaries: bool,
+        headlands: bool,
+        swaths: bool,
+    ) -> PyResult<String> {
+        let options = geojson_options(crs, part_boundaries, headlands, swaths, false)?;
+        self.inner.to_geojson(&options).map_err(py_err)
+    }
+
+    /// Plan every part with `options` (a `PlannerOptions`, or the defaults
+    /// when omitted), then write the field, the ordered rows and the drive
+    /// path to `path`.
+    #[cfg(feature = "geojson")]
+    #[pyo3(signature = (path, options=None, crs="wgs", part_boundaries=true, headlands=true, swaths=true, tours=true))]
+    fn export_planned_geojson(
+        &mut self,
+        path: &str,
+        options: Option<&crate::python::options::PyPlannerOptions>,
+        crs: &str,
+        part_boundaries: bool,
+        headlands: bool,
+        swaths: bool,
+        tours: bool,
+    ) -> PyResult<()> {
+        let planner_options = planner_options_or_default(options);
+        let planned = self.inner.plan_all(&planner_options).map_err(py_err)?;
+        let geojson = geojson_options(crs, part_boundaries, headlands, swaths, tours)?;
+        self.inner
+            .export_planned_geojson(&planned, path, &geojson)
+            .map_err(py_err)
+    }
+
+    /// Same as `export_planned_geojson`, returning the document instead of
+    /// writing it.
+    #[cfg(feature = "geojson")]
+    #[pyo3(signature = (options=None, crs="wgs", part_boundaries=true, headlands=true, swaths=true, tours=true))]
+    fn planned_to_geojson(
+        &mut self,
+        options: Option<&crate::python::options::PyPlannerOptions>,
+        crs: &str,
+        part_boundaries: bool,
+        headlands: bool,
+        swaths: bool,
+        tours: bool,
+    ) -> PyResult<String> {
+        let planner_options = planner_options_or_default(options);
+        let planned = self.inner.plan_all(&planner_options).map_err(py_err)?;
+        let geojson = geojson_options(crs, part_boundaries, headlands, swaths, tours)?;
+        self.inner
+            .planned_to_geojson(&planned, &geojson)
+            .map_err(py_err)
+    }
+
+    /// Plan the machine split described by `options.machines` (using
+    /// `options.routing` and `options.turn`) and write it to `path`. Rows,
+    /// headland arcs and tours each carry a `machine` property.
+    #[cfg(feature = "geojson")]
+    #[pyo3(signature = (path, options=None, crs="wgs", part_boundaries=true, headlands=true, swaths=true, tours=true))]
+    fn export_machines_geojson(
+        &self,
+        path: &str,
+        options: Option<&crate::python::options::PyPlannerOptions>,
+        crs: &str,
+        part_boundaries: bool,
+        headlands: bool,
+        swaths: bool,
+        tours: bool,
+    ) -> PyResult<()> {
+        let planner_options = planner_options_or_default(options);
+        let planned = self
+            .inner
+            .plan_machines_for_part(
+                &planner_options.machines,
+                planner_options.routing,
+                &planner_options.turn,
+            )
+            .map_err(py_err)?;
+        let geojson = geojson_options(crs, part_boundaries, headlands, swaths, tours)?;
+        self.inner
+            .export_machines_geojson(&planned, path, &geojson)
+            .map_err(py_err)
+    }
+
+    /// Same as `export_machines_geojson`, returning the document instead of
+    /// writing it.
+    #[cfg(feature = "geojson")]
+    #[pyo3(signature = (options=None, crs="wgs", part_boundaries=true, headlands=true, swaths=true, tours=true))]
+    fn machines_to_geojson(
+        &self,
+        options: Option<&crate::python::options::PyPlannerOptions>,
+        crs: &str,
+        part_boundaries: bool,
+        headlands: bool,
+        swaths: bool,
+        tours: bool,
+    ) -> PyResult<String> {
+        let planner_options = planner_options_or_default(options);
+        let planned = self
+            .inner
+            .plan_machines_for_part(
+                &planner_options.machines,
+                planner_options.routing,
+                &planner_options.turn,
+            )
+            .map_err(py_err)?;
+        let geojson = geojson_options(crs, part_boundaries, headlands, swaths, tours)?;
+        self.inner
+            .machines_to_geojson(&planned, &geojson)
+            .map_err(py_err)
     }
 
     fn __repr__(&self) -> &'static str {

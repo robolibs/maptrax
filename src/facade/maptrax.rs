@@ -208,8 +208,7 @@ impl Maptrax {
         turn: &TurnPlannerConfig,
         policy: HeadlandSizingPolicy,
     ) -> Result<TurnFeasibilityReport> {
-        let report =
-            turn_feasibility_report(swath_width, requested_headland_count, turn, policy);
+        let report = turn_feasibility_report(swath_width, requested_headland_count, turn, policy);
         if policy == HeadlandSizingPolicy::StrictUser
             && report.requested_headland_count < report.required_headland_count
         {
@@ -222,11 +221,8 @@ impl Maptrax {
                 report.requested_headland_count,
             )));
         }
-        self.field_mut()?.gen_field(
-            swath_width,
-            angle_degrees,
-            report.effective_headland_count,
-        )?;
+        self.field_mut()?
+            .gen_field(swath_width, angle_degrees, report.effective_headland_count)?;
         Ok(report)
     }
 
@@ -473,16 +469,99 @@ impl Maptrax {
         })
     }
 
-    /// Validate that a built tour's connectors stay inside this part's
-    /// boundary and outside its work area (the headland-band corridor).
-    pub fn validate_part_tour(
-        &self,
-        part_index: usize,
-        tour: &[Swath],
-    ) -> Result<TourValidation> {
+    /// Validate that a built tour's connectors stay inside this part's safe
+    /// turn corridor and outside its work area. With headlands present, the
+    /// outer safe boundary is the first headland ring — not the field border —
+    /// so the border-to-first-headland strip remains a no-turn danger zone.
+    pub fn validate_part_tour(&self, part_index: usize, tour: &[Swath]) -> Result<TourValidation> {
         let part = self.field()?.part(part_index)?;
-        let work_area = part.headlands.last().map(|ring| &ring.polygon);
-        Ok(validate_tour(tour, &part.boundary.polygon, work_area))
+        let work_area = (part.headlands.len() >= 2)
+            .then(|| part.headlands.last().map(|ring| &ring.polygon))
+            .flatten();
+        let outer_boundary = part
+            .headlands
+            .first()
+            .map(|ring| &ring.polygon)
+            .unwrap_or(&part.boundary.polygon);
+        Ok(validate_tour(tour, outer_boundary, work_area))
+    }
+
+    /// Build a [`vectory::Vector`] holding the field geometry — border,
+    /// parts, headlands and generated rows. Coordinates stay in local ENU;
+    /// the conversion to longitude/latitude happens on write.
+    #[cfg(feature = "geojson")]
+    pub fn to_vector(
+        &self,
+        options: &crate::export::GeoJsonOptions,
+    ) -> Result<crate::export::Vector> {
+        Ok(crate::export::field_to_vector(self.field()?, options))
+    }
+
+    /// Write the field geometry to a GeoJSON file.
+    #[cfg(feature = "geojson")]
+    pub fn export_geojson(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        options: &crate::export::GeoJsonOptions,
+    ) -> Result<()> {
+        let vector = self.to_vector(options)?;
+        crate::export::write_vector(&vector, path, options.crs)
+    }
+
+    /// Write the field geometry plus a planned result — ordered rows and the
+    /// drive path of every part.
+    #[cfg(feature = "geojson")]
+    pub fn export_planned_geojson(
+        &self,
+        planned: &PlannedField,
+        path: impl AsRef<std::path::Path>,
+        options: &crate::export::GeoJsonOptions,
+    ) -> Result<()> {
+        let vector = crate::export::planned_field_to_vector(self.field()?, planned, options);
+        crate::export::write_vector(&vector, path, options.crs)
+    }
+
+    /// Write the field geometry plus a multi-machine plan. Machine-owned rows,
+    /// headland arcs and tours carry a `machine` property.
+    #[cfg(feature = "geojson")]
+    pub fn export_machines_geojson(
+        &self,
+        planned: &PlannedMachines,
+        path: impl AsRef<std::path::Path>,
+        options: &crate::export::GeoJsonOptions,
+    ) -> Result<()> {
+        let vector = crate::export::planned_machines_to_vector(self.field()?, planned, options);
+        crate::export::write_vector(&vector, path, options.crs)
+    }
+
+    /// The field geometry as a GeoJSON string, for callers that want to hand
+    /// the document to a socket or an HTTP response instead of a file.
+    #[cfg(feature = "geojson")]
+    pub fn to_geojson(&self, options: &crate::export::GeoJsonOptions) -> Result<String> {
+        let vector = self.to_vector(options)?;
+        crate::export::to_json_string(&vector, options.crs)
+    }
+
+    /// A planned result as a GeoJSON string.
+    #[cfg(feature = "geojson")]
+    pub fn planned_to_geojson(
+        &self,
+        planned: &PlannedField,
+        options: &crate::export::GeoJsonOptions,
+    ) -> Result<String> {
+        let vector = crate::export::planned_field_to_vector(self.field()?, planned, options);
+        crate::export::to_json_string(&vector, options.crs)
+    }
+
+    /// A multi-machine plan as a GeoJSON string.
+    #[cfg(feature = "geojson")]
+    pub fn machines_to_geojson(
+        &self,
+        planned: &PlannedMachines,
+        options: &crate::export::GeoJsonOptions,
+    ) -> Result<String> {
+        let vector = crate::export::planned_machines_to_vector(self.field()?, planned, options);
+        crate::export::to_json_string(&vector, options.crs)
     }
 
     /// Plan machines, then validate each machine's tour against the allowed
@@ -527,8 +606,7 @@ impl Maptrax {
                     strategy: RoutingStrategy::SkipRows { stride },
                     ..routing
                 };
-                let plan =
-                    self.plan_machines_for_part(options, attempt_routing, &attempt_turn)?;
+                let plan = self.plan_machines_for_part(options, attempt_routing, &attempt_turn)?;
 
                 let mut violations = 0;
                 for machine in &plan.machines {

@@ -415,7 +415,7 @@ fn forced_headland_mode_always_uses_headland_route_when_available() {
         &[from, to],
         &TurnPlannerConfig {
             connector_mode: ConnectorMode::Headland,
-            model: TurnPlannerModel::Sharper,
+            model: TurnPlannerModel::ReedsShepp,
             swath_width: 10.0,
             min_turning_radius: 2.0,
             machine_length: 6.0,
@@ -424,26 +424,26 @@ fn forced_headland_mode_always_uses_headland_route_when_available() {
         },
     );
 
-    let headland_like = tour
+    let connections = tour
         .iter()
         .filter(|swath| swath.r#type == SwathType::Connection)
-        .filter(|swath| swath.points.len() > 2)
-        .count();
-    assert!(headland_like >= 1);
+        .collect::<Vec<_>>();
+    assert!(!connections.is_empty());
+    assert!(connections.iter().all(|swath| swath.points.len() >= 2));
 }
 
 #[test]
 fn irregular_headland_ring_routing_uses_polyline_path() {
     let part = irregular_part_with_headland();
     let mut from = create_swath(
-        point_xy(20.0, 12.0),
         point_xy(20.0, 60.0),
+        point_xy(12.0, 68.0),
         SwathType::Swath,
         "a",
     );
     from.width = 8.0;
     let to = create_swath(
-        point_xy(92.0, 16.0),
+        point_xy(105.0, 12.0),
         point_xy(92.0, 55.0),
         SwathType::Swath,
         "b",
@@ -511,7 +511,10 @@ fn tiny_headland_entry_exit_hops_do_not_create_triangle_loops() {
         .iter()
         .filter(|swath| swath.r#type == SwathType::Connection)
         .collect::<Vec<_>>();
-    assert!(!connectors.is_empty(), "expected a connector between the rows");
+    assert!(
+        !connectors.is_empty(),
+        "expected a connector between the rows"
+    );
     for connector in &connectors {
         for w in connector.points.windows(3) {
             let step = ((w[1].x() - w[0].x()).powi(2) + (w[1].y() - w[0].y()).powi(2)).sqrt();

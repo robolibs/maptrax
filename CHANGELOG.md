@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.2] - 2026-07-29
+
+### <!-- 0 -->⛰️  Features
+
+- Add combine-harvester-aware turn planning
+
 ## [0.1.1] - 2026-06-06
 
 ### <!-- 0 -->⛰️  Features

@@ -9,6 +9,12 @@ sys_includes = ["stdbool.h", "stddef.h", "stdint.h"]
 [parse]
 parse_deps = false
 
+# The GeoJSON surface only exists when the crate is built with
+# `--features geojson`, so guard its declarations behind a matching macro.
+# Consumers of such a build compile with -DMAPTRAX_GEOJSON.
+[defines]
+"feature = geojson" = "MAPTRAX_GEOJSON"
+
 [enum]
 rename_variants = "QualifiedScreamingSnakeCase"
 prefix_with_name = true

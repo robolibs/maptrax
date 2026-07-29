@@ -4,10 +4,10 @@ build-backend = "maturin"
 
 [project]
 name = "maptrax"
-version = "0.1.0"
+version = "0.1.2"
 description = "Python bindings for the maptrax planning library"
 requires-python = ">=3.9"
 
 [tool.maturin]
-features = ["python"]
+features = ["python-extension", "geojson"]
 module-name = "maptrax"

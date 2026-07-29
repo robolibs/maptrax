@@ -66,6 +66,7 @@
 
         guiLibs = with pkgs; [
           alsa-lib
+          stdenv.cc.cc.lib
           udev
           vulkan-loader
           libxkbcommon
@@ -74,7 +75,10 @@
           libxcursor
           libxi
           libxrandr
+          zlib
         ];
+
+        pythonEnv = pkgs.python3.withPackages (ps: with ps; [ fonttools brotli pip ]);
       in
       {
         devShells.default = pkgs.mkShell {
@@ -89,7 +93,7 @@
             pkgs.rust-cbindgen
             pkgs.trunk
             pkgs.maturin
-            (pkgs.python3.withPackages (ps: with ps; [ fonttools brotli pip ]))
+            pythonEnv
 
             nixGLAlias
             nixVulkanAlias
@@ -101,7 +105,13 @@
           ] ++ guiLibs;
 
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
-          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath guiLibs;
+          # `cargo test --features python` links a test binary against
+          # libpython, so the interpreter's lib dir has to be on the loader
+          # path alongside the GUI libs.
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (guiLibs ++ [ pythonEnv ]);
+          # Pin the interpreter pyo3's build script probes, so the version it
+          # links matches the one on LD_LIBRARY_PATH.
+          PYO3_PYTHON = "${pythonEnv}/bin/python3";
           WGPU_VALIDATION = "0";
           WGPU_DEBUG = "0";
         };

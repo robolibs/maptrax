@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "../../include/maptrax.h"
 
@@ -47,10 +48,10 @@ int main(void) {
   MaptraxPlanResult* result = maptrax_planner_plan_part(
       planner,
       0,
-      (MaptraxRoutingOptions){MAPTRAX_ROUTING_GREEDY_NEAREST, 0},
+      (MaptraxRoutingOptions){MAPTRAX_ROUTING_STRATEGY_MAPTRAX_ROUTING_STRATEGY_GREEDY_NEAREST, 0},
       (MaptraxTurnOptions){
-          MAPTRAX_TURN_REEDS_SHEPP,
-          MAPTRAX_CONNECTOR_AUTO,
+          MAPTRAX_TURN_MODEL_MAPTRAX_TURN_MODEL_REEDS_SHEPP,
+          MAPTRAX_CONNECTOR_MODE_MAPTRAX_CONNECTOR_MODE_AUTO,
           2.0,
           0.2,
           6.0,
@@ -70,10 +71,10 @@ int main(void) {
   MaptraxStagesResult* staged = maptrax_planner_plan_stages_part(
       planner,
       0,
-      (MaptraxRoutingOptions){MAPTRAX_ROUTING_GREEDY_NEAREST, 0},
+      (MaptraxRoutingOptions){MAPTRAX_ROUTING_STRATEGY_MAPTRAX_ROUTING_STRATEGY_GREEDY_NEAREST, 0},
       (MaptraxTurnOptions){
-          MAPTRAX_TURN_REEDS_SHEPP,
-          MAPTRAX_CONNECTOR_AUTO,
+          MAPTRAX_TURN_MODEL_MAPTRAX_TURN_MODEL_REEDS_SHEPP,
+          MAPTRAX_CONNECTOR_MODE_MAPTRAX_CONNECTOR_MODE_AUTO,
           2.0,
           0.2,
           6.0,
@@ -108,6 +109,27 @@ int main(void) {
   printf("reeds_shepp_length=%.3f\n", rs_view.total_length);
 
   maptrax_pose_path_free(rs);
+
+#if defined(MAPTRAX_GEOJSON)
+  /* Only available when the library was built with --features geojson. */
+  MaptraxGeoJsonOptions geo = maptrax_geojson_options_default();
+
+  if (!maptrax_planner_export_geojson(planner, "target/c_abi_field.geojson", geo)) {
+    fprintf(stderr, "export_geojson failed: %s\n", maptrax_last_error_message());
+    return 1;
+  }
+  printf("geojson_file=target/c_abi_field.geojson\n");
+
+  char* text = maptrax_planner_to_geojson(planner, geo);
+  if (text == NULL) {
+    fprintf(stderr, "to_geojson failed: %s\n", maptrax_last_error_message());
+    return 1;
+  }
+  printf("geojson_bytes=%zu\n", strlen(text));
+  printf("geojson_is_collection=%d\n", strstr(text, "\"FeatureCollection\"") != NULL);
+  maptrax_string_free(text);
+#endif
+
   maptrax_stages_result_free(staged);
   maptrax_part_snapshot_free(snapshot);
   maptrax_plan_result_free(result);

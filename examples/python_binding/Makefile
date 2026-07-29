@@ -16,7 +16,8 @@ endif
 VENV := .venv
 VENV_PYTHON := $(CURDIR)/$(VENV)/bin/python
 
-.PHONY: all develop basic turners rerun main \
+.PHONY: all develop basic turners rerun main combine-square-turning combine-irregular-turning \
+        oxbo-pea-field \
         machine-stripe machine-block machine-optimized machine-fairness machine-split \
         clean
 
@@ -26,7 +27,7 @@ $(VENV_PYTHON):
 	@$(PYTHON) -m venv $(VENV)
 
 develop: $(VENV_PYTHON)
-	@cd $(ROOT) && VIRTUAL_ENV=$(CURDIR)/$(VENV) PATH=$(CURDIR)/$(VENV)/bin:$$PATH PYO3_PYTHON=$(VENV_PYTHON) CARGO=$(CARGO_BIN) RUSTC=$(RUSTC_BIN) maturin develop --features python
+	@cd $(ROOT) && VIRTUAL_ENV=$(CURDIR)/$(VENV) PATH=$(CURDIR)/$(VENV)/bin:$$PATH PYO3_PYTHON=$(VENV_PYTHON) CARGO=$(CARGO_BIN) RUSTC=$(RUSTC_BIN) maturin develop --features python-extension,geojson
 
 basic: develop
 	@$(VENV_PYTHON) basic.py
@@ -41,6 +42,18 @@ rerun: develop
 main: develop
 	@$(VENV_PYTHON) -m pip install rerun-sdk
 	@$(VENV_PYTHON) main.py
+
+combine-square-turning: develop
+	@if [ "$$MAPTRAX_NO_RERUN" != "1" ]; then $(VENV_PYTHON) -m pip install rerun-sdk; fi
+	@$(VENV_PYTHON) combine_square_turning.py
+
+combine-irregular-turning: develop
+	@if [ "$$MAPTRAX_NO_RERUN" != "1" ]; then $(VENV_PYTHON) -m pip install rerun-sdk; fi
+	@$(VENV_PYTHON) combine_irregular_turning.py
+
+oxbo-pea-field: develop
+	@if ! $(VENV_PYTHON) -c "import matplotlib" >/dev/null 2>&1; then $(VENV_PYTHON) -m pip install matplotlib; fi
+	@$(VENV_PYTHON) oxbo_pea_field.py
 
 machine-stripe: develop
 	@$(VENV_PYTHON) -m pip install rerun-sdk

@@ -56,7 +56,7 @@ bind-c:
 		--output include/$(PROJECT_NAME).h
 
 bind-py:
-	@maturin build --features python
+	@maturin build --features python-extension,geojson
 
 docs:
 	@command -v mdbook >/dev/null 2>&1 || { echo "mdbook is not installed. Please install it first."; exit 1; }

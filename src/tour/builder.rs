@@ -1,7 +1,7 @@
 use crate::core::{
     Point, Point2Ext, Polygon, Segment, aabb_from_points, angle_difference, heading_between,
-    point_distance, point_xy, points_equal, polygon_from_points, polygon_open_vertices, segment_end,
-    segment_new, segment_start,
+    point_distance, point_xy, points_equal, polygon_from_points, polygon_open_vertices,
+    polygon_shrink, segment_end, segment_new, segment_start,
 };
 use crate::field::{Part, Swath, SwathType, create_swath};
 use crate::turners::{Dubins, Pose2D, ReedsShepp, Sharper};
@@ -98,6 +98,16 @@ pub struct TurnFeasibilityReport {
 }
 
 impl TurnPlannerConfig {
+    /// Conservative radius of the machine footprint around the path centerline.
+    /// This is used when choosing a headland turning lane / pocket. It is not a
+    /// full swept-volume model; it is a cheap first-order envelope that makes
+    /// larger/longer machines choose deeper turning points.
+    pub fn turning_envelope_radius(&self) -> f64 {
+        let length = self.machine_length.max(0.0);
+        let width = self.machine_width.max(0.0);
+        0.5 * (length * length + width * width).sqrt()
+    }
+
     /// Conservative estimate of the turn space this configuration needs.
     pub fn required_turn_space(&self) -> TurnSpaceRequirement {
         let r = self.min_turning_radius.max(0.0);
@@ -184,7 +194,8 @@ pub fn turn_feasibility_report(
     // If the effective headland band is shallower than the turn needs, recover
     // the missing space laterally by skipping rows.
     let effective_depth = effective as f64 * swath_width;
-    let row_skip_stride = if swath_width <= 0.0 || effective_depth + 1e-9 >= req.min_headland_depth {
+    let row_skip_stride = if swath_width <= 0.0 || effective_depth + 1e-9 >= req.min_headland_depth
+    {
         1
     } else {
         required_row_skip_stride(swath_width, cfg)
@@ -210,12 +221,12 @@ impl TourBuilder {
             return Vec::new();
         }
 
-        let headland_ring = outer_headland_ring(part);
+        let headland_ring = turning_lane_ring(part, cfg);
         // Turns must not cut through the work area — the region inside the
-        // innermost headland ring (where swaths live) — nor swing outside the
-        // field border.
-        let work_area = innermost_headland_ring(part);
-        let field = Some(&part.boundary.polygon);
+        // innermost headland ring (where swaths live) — nor swing into the
+        // unsafe outer strip between the field border and the first headland.
+        let work_area = turn_corridor_inner_boundary(part);
+        let turn_boundary = Some(turn_corridor_outer_boundary(part));
         let mut out = Vec::with_capacity(ordered_swaths.len() * 2);
 
         for (index, swath) in ordered_swaths.iter().enumerate() {
@@ -224,9 +235,9 @@ impl TourBuilder {
                 out.extend(connect_between_swaths(
                     swath,
                     next,
-                    headland_ring,
+                    &headland_ring,
                     work_area,
-                    field,
+                    turn_boundary,
                     cfg,
                 ));
             }
@@ -254,8 +265,8 @@ impl TourBuilder {
             return Self::build(part, ordered_swaths, cfg);
         }
 
-        let work_area = innermost_headland_ring(part);
-        let field = Some(&part.boundary.polygon);
+        let work_area = turn_corridor_inner_boundary(part);
+        let turn_boundary = Some(turn_corridor_outer_boundary(part));
         let mut out: Vec<Swath> = Vec::new();
 
         for arc in headland_arcs {
@@ -264,7 +275,9 @@ impl TourBuilder {
             }
 
             if let Some(prev) = out.last() {
-                if let Some(conn) = build_connector(prev, arc[0], arc[1], work_area, field, cfg) {
+                if let Some(conn) =
+                    build_connector(prev, arc[0], arc[1], work_area, turn_boundary, cfg)
+                {
                     out.push(conn);
                 }
             }
@@ -298,32 +311,35 @@ impl TourBuilder {
                     project_to_ring(inner_polygon, from_end),
                     project_to_ring(inner_polygon, to_start),
                 ) {
-                    let ring_path = shorter_ring_path(inner_polygon, start_proj, goal_proj);
-                    let mut ring_path = smooth_headland_path(&ring_path, cfg);
-                    // Force endpoints to match the actual previous segment's
-                    // tail and next swath's head so the tour stays gap-free.
-                    if let Some(first) = ring_path.first().copied() {
-                        if !points_equal(first, from_end, 1e-6) {
-                            ring_path.insert(0, from_end);
+                    let raw_ring_path = shorter_ring_path(inner_polygon, start_proj, goal_proj);
+                    if let Some(mut ring_path) =
+                        smooth_headland_path(&raw_ring_path, work_area, turn_boundary, cfg)
+                    {
+                        // Force endpoints to match the actual previous segment's
+                        // tail and next swath's head so the tour stays gap-free.
+                        if let Some(first) = ring_path.first().copied() {
+                            if !points_equal(first, from_end, 1e-6) {
+                                ring_path.insert(0, from_end);
+                            }
+                        } else {
+                            ring_path.push(from_end);
                         }
-                    } else {
-                        ring_path.push(from_end);
-                    }
-                    if let Some(last) = ring_path.last().copied() {
-                        if !points_equal(last, to_start, 1e-6) {
-                            ring_path.push(to_start);
+                        if let Some(last) = ring_path.last().copied() {
+                            if !points_equal(last, to_start, 1e-6) {
+                                ring_path.push(to_start);
+                            }
                         }
-                    }
-                    if ring_path.len() >= 2 {
-                        let mut ring_swath = create_swath(
-                            ring_path[0],
-                            *ring_path.last().unwrap(),
-                            SwathType::Connection,
-                            String::new(),
-                        );
-                        ring_swath.bounding_box = aabb_from_points(&ring_path);
-                        ring_swath.points = ring_path;
-                        out.push(ring_swath);
+                        if ring_path.len() >= 2 {
+                            let mut ring_swath = create_swath(
+                                ring_path[0],
+                                *ring_path.last().unwrap(),
+                                SwathType::Connection,
+                                String::new(),
+                            );
+                            ring_swath.bounding_box = aabb_from_points(&ring_path);
+                            ring_swath.points = ring_path;
+                            out.push(ring_swath);
+                        }
                     }
                 }
             }
@@ -367,8 +383,80 @@ fn build_connector(
     Some(connector)
 }
 
-/// The headland ring that connectors route along when transitioning
-/// between swaths. Needs to be FARTHER from the swath endpoints than the
+/// Machine-aware centerline for headland turns.
+///
+/// Old behavior used a fixed existing headland ring. That means a tiny machine
+/// and a long machine may attach to the same row-to-row turn points. Here we
+/// synthesize a lane inside the headland band:
+///
+/// - never outside the first/outermost headland,
+/// - deeper when the machine footprint envelope is larger,
+/// - never deeper than the available headland band.
+///
+/// If no headlands or sizing information exist, fall back to the previous
+/// fixed-ring behavior.
+fn turning_lane_ring(part: &Part, cfg: &TurnPlannerConfig) -> Polygon {
+    let Some(depth) = turning_lane_depth(part, cfg) else {
+        return outer_headland_ring(part).clone();
+    };
+    let Some(lane) = polygon_shrink(&part.boundary.polygon, depth) else {
+        return outer_headland_ring(part).clone();
+    };
+
+    // For safety the synthetic lane must not sit in the forbidden outer strip.
+    // In normal generated fields `depth >= swath_width` makes this true. For
+    // hand-built/irregular fixtures, fall back to the actual first headland if
+    // the synthetic offset does not fit inside it.
+    if let Some(outer_safe) = part.headlands.first() {
+        if !polygon_boundary_stays_inside(&lane, &outer_safe.polygon) {
+            return outer_safe.polygon.clone();
+        }
+    }
+
+    lane
+}
+
+fn polygon_boundary_stays_inside(poly: &Polygon, boundary: &Polygon) -> bool {
+    let mut points = polygon_open_vertices(poly);
+    if let Some(first) = points.first().copied() {
+        points.push(first);
+    }
+    path_stays_inside(&points, boundary)
+}
+
+fn turning_lane_depth(part: &Part, cfg: &TurnPlannerConfig) -> Option<f64> {
+    if part.headlands.is_empty() {
+        return None;
+    }
+
+    let swath_width = effective_swath_width(part, cfg)?;
+    let band_depth = swath_width * part.headlands.len() as f64;
+    if band_depth <= 1e-9 {
+        return None;
+    }
+
+    let outer_headland_depth = swath_width;
+    let envelope = cfg.turning_envelope_radius();
+
+    // The first headland ring is the *outer* safety boundary, not a centerline
+    // target. Put the turn lane one machine-envelope inward from that boundary
+    // so the machine does not swing back into the border→first-headland danger
+    // strip. Single-headland fixtures have no finite corridor, so this clamps
+    // back to the first headland ring.
+    Some((outer_headland_depth + envelope).min(band_depth))
+}
+
+fn effective_swath_width(part: &Part, cfg: &TurnPlannerConfig) -> Option<f64> {
+    if cfg.swath_width > 0.0 {
+        return Some(cfg.swath_width);
+    }
+    part.swaths
+        .iter()
+        .find_map(|swath| (swath.width > 0.0).then_some(swath.width))
+}
+
+/// Fallback headland ring for connectors when a machine-aware synthetic lane
+/// cannot be built. Needs to be FARTHER from the swath endpoints than the
 /// innermost ring — otherwise the enter/exit Dubins arcs collapse to
 /// zero and you get no visible turn geometry. Rule:
 ///   * 0 rings           → field boundary
@@ -386,11 +474,28 @@ fn outer_headland_ring(part: &Part) -> &Polygon {
     &part.headlands[0].polygon
 }
 
-/// Innermost headland ring — the boundary of the work area. Turn arcs must
-/// stay OUTSIDE this polygon (i.e., in the headland band, not crossing
-/// already-worked swaths). Returns None when no headlands exist.
-fn innermost_headland_ring(part: &Part) -> Option<&Polygon> {
-    part.headlands.last().map(|ring| &ring.polygon)
+/// Inner boundary of the allowed turn corridor.
+///
+/// With two or more headland rings, turns must stay outside the innermost ring
+/// so they do not cut through the interior work area. With only one headland
+/// ring there is no finite-width corridor between an outer and inner headland,
+/// so the path is constrained only by the outer safe boundary.
+fn turn_corridor_inner_boundary(part: &Part) -> Option<&Polygon> {
+    (part.headlands.len() >= 2)
+        .then(|| part.headlands.last().map(|ring| &ring.polygon))
+        .flatten()
+}
+
+/// Outer boundary of the allowed turn corridor.
+///
+/// With headlands present this is the FIRST/outermost headland ring, not the
+/// field border. The strip between the field border and that first headland is
+/// an unsafe margin: no connector/turner geometry may enter it.
+fn turn_corridor_outer_boundary(part: &Part) -> &Polygon {
+    part.headlands
+        .first()
+        .map(|ring| &ring.polygon)
+        .unwrap_or(&part.boundary.polygon)
 }
 
 #[derive(Clone)]
@@ -407,28 +512,79 @@ fn connect_between_swaths(
     cfg: &TurnPlannerConfig,
 ) -> Vec<Swath> {
     let headland = headland_connection_plan(from, to, field_ring, work_area, field, cfg);
+    let prefer_direct = should_prefer_direct_turn(from, to, cfg);
 
     match cfg.connector_mode {
         ConnectorMode::Direct => {
             // Tight swath-to-swath turn at the row end (no headland detour).
             // Still prefer the headland route if the direct turn isn't viable.
             let direct = direct_connection_plan(from, to, work_area, field, cfg);
-            direct.or(headland).map(|plan| plan.segments).unwrap_or_default()
+            direct
+                .or(headland)
+                .map(|plan| plan.segments)
+                .unwrap_or_default()
         }
-        ConnectorMode::Headland | ConnectorMode::Auto => {
+        ConnectorMode::Headland => {
             // Realistic farming rule: never cut across finished swaths.
-            // Always route through the headland band.
+            // Forced headland mode means line -> headland -> line, not direct
+            // row-to-row shortcuts.
             if let Some(plan) = headland {
                 plan.segments
             } else {
-                // Only fall back to a direct turn when the field has no
-                // headlands at all.
+                direct_connection_plan(from, to, work_area, field, cfg)
+                    .map(|plan| plan.segments)
+                    .unwrap_or_default()
+            }
+        }
+        ConnectorMode::Auto => {
+            if prefer_direct {
+                if let Some(plan) = direct_connection_plan(from, to, work_area, field, cfg) {
+                    return plan.segments;
+                }
+            }
+
+            // Otherwise route through the headland band.
+            if let Some(plan) = headland {
+                plan.segments
+            } else {
                 direct_connection_plan(from, to, work_area, field, cfg)
                     .map(|plan| plan.segments)
                     .unwrap_or_default()
             }
         }
     }
+}
+
+fn should_prefer_direct_turn(from: &Swath, to: &Swath, cfg: &TurnPlannerConfig) -> bool {
+    if cfg.headland_threshold_rows <= 0.0 {
+        return false;
+    }
+
+    let swath_width = if cfg.swath_width > 0.0 {
+        cfg.swath_width
+    } else if from.width > 0.0 {
+        from.width
+    } else {
+        to.width
+    };
+    if swath_width <= 0.0 {
+        return false;
+    }
+
+    approximate_swath_spacing(from, to) <= swath_width * cfg.headland_threshold_rows + 1e-9
+}
+
+fn approximate_swath_spacing(a: &Swath, b: &Swath) -> f64 {
+    let a_line = a.line;
+    let b_line = b.line;
+    [
+        segment_distance_to_point(a_line, b.head()),
+        segment_distance_to_point(a_line, b.tail()),
+        segment_distance_to_point(b_line, a.head()),
+        segment_distance_to_point(b_line, a.tail()),
+    ]
+    .into_iter()
+    .fold(f64::INFINITY, f64::min)
 }
 
 fn direct_connection_plan(
@@ -466,13 +622,15 @@ fn headland_connection_plan(
     // right next to the row end and follow the band smoothly (a bare polygon
     // ring has only its corner vertices — a rectangle ring = 4 points).
     let dense_ring = densify_polygon(headland_ring, RING_NODE_SPACING_M);
-    let start_proj = project_to_ring(&dense_ring, from_end)?;
-    let goal_proj = project_to_ring(&dense_ring, to_start)?;
-    let ring_path = shorter_ring_path(&dense_ring, start_proj, goal_proj);
+    let start_proj = project_to_turning_point(&dense_ring, from_end, work_area, field, cfg)
+        .or_else(|| project_to_ring(&dense_ring, from_end))?;
+    let goal_proj = project_to_turning_point(&dense_ring, to_start, work_area, field, cfg)
+        .or_else(|| project_to_ring(&dense_ring, to_start))?;
+    let mut ring_path = shorter_ring_path(&dense_ring, start_proj, goal_proj);
     if ring_path.len() < 2 {
-        return None;
+        ring_path = vec![start_proj.point, goal_proj.point];
     }
-    let ring_path = smooth_headland_path(&ring_path, cfg);
+    let ring_path = smooth_headland_path(&ring_path, work_area, field, cfg)?;
 
     let mut out = Vec::new();
 
@@ -494,19 +652,23 @@ fn headland_connection_plan(
         ) {
             enter.r#type = SwathType::Connection;
             out.push(enter);
+        } else {
+            return None;
         }
     }
 
     // FOLLOW: drive the dense headland ring between the two attach points.
-    let mut ring_swath = create_swath(
-        ring_path[0],
-        *ring_path.last().unwrap(),
-        SwathType::Connection,
-        "",
-    );
-    ring_swath.points = ring_path.clone();
-    ring_swath.bounding_box = aabb_from_points(&ring_path);
-    out.push(ring_swath);
+    if ring_path.len() >= 2 && !points_equal(ring_path[0], *ring_path.last().unwrap(), 1e-6) {
+        let mut ring_swath = create_swath(
+            ring_path[0],
+            *ring_path.last().unwrap(),
+            SwathType::Connection,
+            "",
+        );
+        ring_swath.points = ring_path.clone();
+        ring_swath.bounding_box = aabb_from_points(&ring_path);
+        out.push(ring_swath);
+    }
 
     // EXIT: TURNER-planned maneuver from the ring back into the next row.
     if !points_equal(goal_proj.point, to_start, 1e-6) {
@@ -527,6 +689,8 @@ fn headland_connection_plan(
         ) {
             exit.r#type = SwathType::Connection;
             out.push(exit);
+        } else {
+            return None;
         }
     }
 
@@ -547,7 +711,8 @@ fn direct_connection_swath_points(
     let tiny_hop = distance <= cfg.min_turning_radius.max(cfg.step_size) * 0.75;
     let near_aligned = heading_delta <= 25.0_f64.to_radians();
     if points_equal(start_point, goal_point, 1e-6) || (tiny_hop && near_aligned) {
-        return straight_connection_swath(start_point, goal_point);
+        let straight = straight_connection_swath(start_point, goal_point)?;
+        return path_is_safe(&straight.points, work_area, field).then_some(straight);
     }
 
     let start = Pose2D::from_point(start_point, start_yaw);
@@ -624,13 +789,13 @@ fn direct_connection_swath_points(
 
     let (polyline, reverse_flags) = select_best_path(candidates, work_area, field)?;
     if polyline.len() < 2 {
-        return straight_connection_swath(start_point, goal_point);
+        return None;
     }
     if polyline
         .windows(2)
         .all(|pair| point_distance(pair[0], pair[1]) <= 1e-9)
     {
-        return straight_connection_swath(start_point, goal_point);
+        return None;
     }
 
     let mut swath = create_swath(
@@ -646,9 +811,9 @@ fn direct_connection_swath_points(
 }
 
 /// Pick the shortest candidate path that keeps its interior OUTSIDE the work
-/// area. Start and end points are allowed to lie on the work-area boundary
-/// (swaths start/end there). If no candidate is clean, fall back to the
-/// shortest one so we always return something.
+/// area and INSIDE the safe outer boundary. Start and end points are allowed to
+/// lie on corridor boundaries. If no candidate is clean, return `None` rather
+/// than drawing a hard-corner or unsafe fallback.
 fn select_best_path(
     candidates: Vec<(Vec<Point>, Vec<bool>)>,
     work_area: Option<&Polygon>,
@@ -679,6 +844,12 @@ fn select_best_path(
             clean.push((points.clone(), reverse.clone()));
         }
         all.push((points, reverse));
+    }
+
+    // Safety constraints are hard constraints. If every turner candidate
+    // leaves the safe corridor, do NOT pick "least bad" geometry.
+    if clean.is_empty() && (work_area.is_some() || field.is_some()) {
+        return None;
     }
 
     let pool = if clean.is_empty() { all } else { clean };
@@ -727,7 +898,7 @@ fn point_outside_polygon(point: Point, polygon: &Polygon, tol: f64) -> bool {
 }
 
 /// Outcome of validating a tour's connector segments against the allowed
-/// corridor (inside the field boundary, outside the work area / headland band).
+/// corridor (inside the outer allowed boundary, outside the work area).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TourValidation {
     /// Connector (turn) segments inspected.
@@ -750,12 +921,13 @@ impl TourValidation {
     }
 }
 
-/// Validate that every connector segment in `tour` stays inside `boundary` and
-/// outside `work_area` (the headland-band corridor). Only `Connection`/`Around`
-/// segments are checked — the work rows themselves are not connectors.
+/// Validate that every connector segment in `tour` stays inside
+/// `outer_boundary` and outside `work_area` (the headland-band corridor). Only
+/// `Connection`/`Around` segments are checked — the work rows themselves are
+/// not connectors.
 pub fn validate_tour(
     tour: &[Swath],
-    boundary: &Polygon,
+    outer_boundary: &Polygon,
     work_area: Option<&Polygon>,
 ) -> TourValidation {
     let mut result = TourValidation::default();
@@ -771,7 +943,10 @@ pub fn validate_tour(
         };
         // A point sitting on the boundary edge (e.g. clamped there) is on the
         // field, not outside it — only count points genuinely beyond the edge.
-        if points.iter().any(|p| point_outside_polygon(*p, boundary, 0.06)) {
+        if points
+            .iter()
+            .any(|p| point_outside_polygon(*p, outer_boundary, 0.06))
+        {
             result.outside_boundary += 1;
         }
         if let Some(area) = work_area {
@@ -860,9 +1035,28 @@ fn straight_connection_swath(start_point: Point, goal_point: Point) -> Option<Sw
     Some(swath)
 }
 
-fn smooth_headland_path(points: &[Point], cfg: &TurnPlannerConfig) -> Vec<Point> {
+fn path_is_safe(path: &[Point], work_area: Option<&Polygon>, field: Option<&Polygon>) -> bool {
+    if let Some(area) = work_area {
+        if !path_stays_outside(path, area) {
+            return false;
+        }
+    }
+    if let Some(boundary) = field {
+        if !path_stays_inside(path, boundary) {
+            return false;
+        }
+    }
+    true
+}
+
+fn smooth_headland_path(
+    points: &[Point],
+    work_area: Option<&Polygon>,
+    field: Option<&Polygon>,
+    cfg: &TurnPlannerConfig,
+) -> Option<Vec<Point>> {
     if points.len() < 3 {
-        return points.to_vec();
+        return Some(points.to_vec());
     }
 
     let mut out = vec![points[0]];
@@ -913,8 +1107,8 @@ fn smooth_headland_path(points: &[Point], cfg: &TurnPlannerConfig) -> Vec<Point>
             in_heading,
             corner_out,
             out_heading,
-            None,
-            None,
+            work_area,
+            field,
             cfg,
         ) {
             for point in turn.points.into_iter().skip(1) {
@@ -922,7 +1116,11 @@ fn smooth_headland_path(points: &[Point], cfg: &TurnPlannerConfig) -> Vec<Point>
                     out.push(point);
                 }
             }
-        } else if !points_equal(*out.last().unwrap(), corner_out, 1e-6) {
+        } else {
+            return None;
+        }
+
+        if !points_equal(*out.last().unwrap(), corner_out, 1e-6) {
             out.push(corner_out);
         }
     }
@@ -930,7 +1128,7 @@ fn smooth_headland_path(points: &[Point], cfg: &TurnPlannerConfig) -> Vec<Point>
     if !points_equal(*out.last().unwrap(), *points.last().unwrap(), 1e-6) {
         out.push(*points.last().unwrap());
     }
-    dedup_polyline(out)
+    Some(dedup_polyline(out))
 }
 
 #[derive(Clone, Copy)]
@@ -961,7 +1159,10 @@ fn densify_polygon(poly: &Polygon, step: f64) -> Polygon {
         let n = (dist / step).floor() as usize;
         for k in 1..n {
             let t = k as f64 / n as f64;
-            out.push(point_xy(a.x() + (b.x() - a.x()) * t, a.y() + (b.y() - a.y()) * t));
+            out.push(point_xy(
+                a.x() + (b.x() - a.x()) * t,
+                a.y() + (b.y() - a.y()) * t,
+            ));
         }
     }
     polygon_from_points(out)
@@ -1009,6 +1210,124 @@ fn project_to_ring(ring: &Polygon, point: Point) -> Option<Projection> {
         seg_idx: best_seg_idx,
         t: best_t,
     })
+}
+
+/// Pick the concrete turning point/pocket on the chosen headland lane.
+///
+/// The nearest projection is still preferred, but for large machines it may sit
+/// too close to the crop boundary or outer field boundary. In that case, search
+/// nearby dense-ring vertices and pick the closest one that has enough corridor
+/// clearance for the machine envelope. If none is perfect, pick the least-bad
+/// nearby point with the most clearance.
+fn project_to_turning_point(
+    ring: &Polygon,
+    ideal: Point,
+    work_area: Option<&Polygon>,
+    field: Option<&Polygon>,
+    cfg: &TurnPlannerConfig,
+) -> Option<Projection> {
+    let ideal_projection = project_to_ring(ring, ideal)?;
+    let required_clearance = cfg.turning_envelope_radius();
+    let search_radius = turning_point_search_radius(cfg)
+        .max(point_distance(ideal, ideal_projection.point) + RING_NODE_SPACING_M);
+
+    let vertices = polygon_open_vertices(ring);
+    let candidates = std::iter::once(ideal_projection).chain(vertices.into_iter().enumerate().map(
+        |(seg_idx, point)| Projection {
+            point,
+            seg_idx,
+            t: 0.0,
+        },
+    ));
+
+    let mut best_clean: Option<(Projection, f64)> = None;
+    let mut best_fallback: Option<(Projection, f64, f64)> = None;
+
+    for candidate in candidates {
+        let distance_from_ideal = point_distance(candidate.point, ideal_projection.point);
+        if distance_from_ideal > search_radius + 1e-9 {
+            continue;
+        }
+
+        let Some(clearance) = corridor_clearance(candidate.point, work_area, field) else {
+            continue;
+        };
+
+        if clearance + 1e-9 >= required_clearance {
+            let replace = best_clean
+                .as_ref()
+                .is_none_or(|(_, best_distance)| distance_from_ideal < *best_distance - 1e-9);
+            if replace {
+                best_clean = Some((candidate, distance_from_ideal));
+            }
+        }
+
+        let replace_fallback =
+            best_fallback
+                .as_ref()
+                .is_none_or(|(_, best_clearance, best_distance)| {
+                    clearance > *best_clearance + 1e-9
+                        || ((clearance - *best_clearance).abs() <= 1e-9
+                            && distance_from_ideal < *best_distance - 1e-9)
+                });
+        if replace_fallback {
+            best_fallback = Some((candidate, clearance, distance_from_ideal));
+        }
+    }
+
+    best_clean
+        .map(|(projection, _)| projection)
+        .or_else(|| best_fallback.map(|(projection, _, _)| projection))
+}
+
+fn turning_point_search_radius(cfg: &TurnPlannerConfig) -> f64 {
+    cfg.min_turning_radius
+        .max(cfg.machine_length)
+        .max(cfg.machine_width)
+        .max(RING_NODE_SPACING_M * 2.0)
+}
+
+fn corridor_clearance(
+    point: Point,
+    work_area: Option<&Polygon>,
+    field: Option<&Polygon>,
+) -> Option<f64> {
+    let mut clearance = f64::INFINITY;
+
+    if let Some(boundary) = field {
+        if point_outside_polygon(point, boundary, 0.02) {
+            return None;
+        }
+        clearance = clearance.min(distance_to_polygon_boundary(point, boundary));
+    }
+
+    if let Some(work_area) = work_area {
+        if point_strictly_inside(point, work_area) {
+            return None;
+        }
+        clearance = clearance.min(distance_to_polygon_boundary(point, work_area));
+    }
+
+    if clearance.is_finite() {
+        Some(clearance)
+    } else {
+        Some(0.0)
+    }
+}
+
+fn distance_to_polygon_boundary(point: Point, polygon: &Polygon) -> f64 {
+    let ring = polygon_open_vertices(polygon);
+    if ring.len() < 2 {
+        return f64::INFINITY;
+    }
+
+    (0..ring.len())
+        .map(|i| {
+            let a = ring[i];
+            let b = ring[(i + 1) % ring.len()];
+            segment_distance_to_point(segment_new(a, b), point)
+        })
+        .fold(f64::INFINITY, f64::min)
 }
 
 fn shorter_ring_path(ring: &Polygon, start: Projection, goal: Projection) -> Vec<Point> {
@@ -1087,8 +1406,7 @@ fn point_in_polygon(point: Point, polygon: &Polygon) -> bool {
         // *signed* dy — taking its absolute value flips the result for
         // downward edges and misclassifies points.
         if (pi.y() > point.y()) != (pj.y() > point.y()) {
-            let cross_x =
-                (pj.x() - pi.x()) * (point.y() - pi.y()) / (pj.y() - pi.y()) + pi.x();
+            let cross_x = (pj.x() - pi.x()) * (point.y() - pi.y()) / (pj.y() - pi.y()) + pi.x();
             if point.x() < cross_x {
                 inside = !inside;
             }
@@ -1106,6 +1424,8 @@ fn dedup_polyline(mut points: Vec<Point>) -> Vec<Point> {
 #[cfg(test)]
 mod turn_space_tests {
     use super::*;
+    use crate::core::polygon_aabb;
+    use crate::{Field, Geo, point_xy, polygon_from_points};
 
     fn cfg(model: TurnPlannerModel, radius: f64, length: f64, width: f64) -> TurnPlannerConfig {
         TurnPlannerConfig {
@@ -1115,6 +1435,29 @@ mod turn_space_tests {
             machine_width: width,
             ..TurnPlannerConfig::default()
         }
+    }
+
+    fn rect_field_with_headlands(swath_width: f64, headland_count: usize) -> Field {
+        rect_field_with_size(100.0, 60.0, swath_width, headland_count)
+    }
+
+    fn rect_field_with_size(
+        width: f64,
+        height: f64,
+        swath_width: f64,
+        headland_count: usize,
+    ) -> Field {
+        let polygon = polygon_from_points(vec![
+            point_xy(0.0, 0.0),
+            point_xy(width, 0.0),
+            point_xy(width, height),
+            point_xy(0.0, height),
+        ]);
+        let mut field = Field::new(polygon, Geo::new(51.0, 5.0, 0.0)).expect("field");
+        field
+            .gen_field(swath_width, 90.0, headland_count)
+            .expect("generated");
+        field
     }
 
     #[test]
@@ -1180,5 +1523,97 @@ mod turn_space_tests {
         let c = cfg(TurnPlannerModel::Dubins, 8.0, 6.0, 0.0);
         let report = turn_feasibility_report(3.0, 2, &c, HeadlandSizingPolicy::StrictUser);
         assert_eq!(report.effective_headland_count, 2);
+    }
+
+    #[test]
+    fn single_headland_uses_first_headland_as_outer_safety_boundary() {
+        let field = rect_field_with_headlands(10.0, 1);
+        let part = &field.get_parts()[0];
+        let c = TurnPlannerConfig {
+            swath_width: 10.0,
+            machine_length: 6.0,
+            machine_width: 3.0,
+            ..cfg(TurnPlannerModel::ReedsShepp, 3.0, 6.0, 3.0)
+        };
+
+        let depth = turning_lane_depth(part, &c).expect("turning lane depth");
+        assert!((depth - 10.0).abs() < 1e-9);
+
+        let lane = turning_lane_ring(part, &c);
+        let lane_bb = polygon_aabb(&lane).expect("lane aabb");
+        let crop_bb = polygon_aabb(&part.headlands[0].polygon).expect("crop edge aabb");
+
+        assert!((lane_bb.min_point.x - 10.0).abs() < 1e-6);
+        assert!((lane_bb.min_point.y - 10.0).abs() < 1e-6);
+        assert!((lane_bb.max_point.x - 90.0).abs() < 1e-6);
+        assert!((lane_bb.max_point.y - 50.0).abs() < 1e-6);
+
+        // The old machine-aware lane used half a swath, which placed turns in
+        // the forbidden strip between the border and the first headland. The
+        // safe minimum is the first headland itself.
+        assert!((lane_bb.min_point.x - crop_bb.min_point.x).abs() < 1e-6);
+        assert!((lane_bb.min_point.y - crop_bb.min_point.y).abs() < 1e-6);
+    }
+
+    #[test]
+    fn longer_machine_selects_deeper_turning_lane_when_band_allows() {
+        let field = rect_field_with_size(160.0, 140.0, 10.0, 4);
+        let part = &field.get_parts()[0];
+
+        let small = TurnPlannerConfig {
+            swath_width: 10.0,
+            machine_length: 2.0,
+            machine_width: 1.0,
+            ..cfg(TurnPlannerModel::ReedsShepp, 3.0, 2.0, 1.0)
+        };
+        let large = TurnPlannerConfig {
+            swath_width: 10.0,
+            machine_length: 28.0,
+            machine_width: 8.0,
+            ..cfg(TurnPlannerModel::ReedsShepp, 8.0, 28.0, 8.0)
+        };
+
+        let small_depth = turning_lane_depth(part, &small).expect("small lane");
+        let large_depth = turning_lane_depth(part, &large).expect("large lane");
+
+        assert!(small_depth > 10.0);
+        assert!(small_depth < 12.0);
+        assert!(large_depth > small_depth + 4.0);
+        assert!(large_depth <= 40.0); // never deeper than the 40 m headland band
+    }
+
+    #[test]
+    fn combine_connectors_stay_inside_first_headland_not_border_strip() {
+        let field = rect_field_with_size(120.0, 120.0, 6.0, 4);
+        let part = &field.get_parts()[0];
+        let cfg = TurnPlannerConfig {
+            model: TurnPlannerModel::Dubins,
+            connector_mode: ConnectorMode::Headland,
+            min_turning_radius: 8.0,
+            machine_length: 9.0,
+            machine_width: 4.0,
+            swath_width: 6.0,
+            headland_threshold_rows: 0.0,
+            ..TurnPlannerConfig::default()
+        };
+
+        let tour = TourBuilder::build(part, &part.swaths, &cfg);
+        let connectors = tour
+            .iter()
+            .filter(|swath| swath.r#type == SwathType::Connection)
+            .count();
+        assert!(connectors > 0, "expected connection turns in the tour");
+
+        let outer_safe_boundary = &part.headlands[0].polygon;
+        let work_area = part.headlands.last().map(|ring| &ring.polygon);
+        let validation = validate_tour(&tour, outer_safe_boundary, work_area);
+        assert_eq!(
+            validation.outside_boundary, 0,
+            "connectors entered the border-to-first-headland danger zone"
+        );
+        assert_eq!(
+            validation.through_work_area, 0,
+            "connectors cut into the interior work area"
+        );
     }
 }
