@@ -24,7 +24,7 @@ geojson = ["dep:vectory"]
 
 [[example]]
 name = "geojson_export"
-path = "examples/geojson_export.rs"
+path = "examples/rust/geojson_export.rs"
 required-features = ["geojson"]
 
 [dependencies]
@@ -36,3 +36,96 @@ pyo3 = { version = "0.23", optional = true, features = ["abi3-py39"] }
 
 [dev-dependencies]
 rerun = { version = "0.31.2", default-features = false, features = ["sdk", "server"] }
+
+[[example]]
+name = "combine_irregular_turning"
+path = "examples/rust/combine_irregular_turning.rs"
+
+[[example]]
+name = "combine_square_turning"
+path = "examples/rust/combine_square_turning.rs"
+
+[[example]]
+name = "division"
+path = "examples/rust/division.rs"
+
+[[example]]
+name = "facade_end_to_end"
+path = "examples/rust/facade_end_to_end.rs"
+
+[[example]]
+name = "farmtrax_rerun"
+path = "examples/rust/farmtrax_rerun.rs"
+
+[[example]]
+name = "field_generation"
+path = "examples/rust/field_generation.rs"
+
+[[example]]
+name = "heads"
+path = "examples/rust/heads.rs"
+
+[[example]]
+name = "machine_block"
+path = "examples/rust/machine_block.rs"
+
+[[example]]
+name = "machine_fairness"
+path = "examples/rust/machine_fairness.rs"
+
+[[example]]
+name = "machine_optimized"
+path = "examples/rust/machine_optimized.rs"
+
+[[example]]
+name = "machine_split_field"
+path = "examples/rust/machine_split_field.rs"
+
+[[example]]
+name = "machine_stripe"
+path = "examples/rust/machine_stripe.rs"
+
+[[example]]
+name = "main"
+path = "examples/rust/main.rs"
+
+[[example]]
+name = "main_decomposed"
+path = "examples/rust/main_decomposed.rs"
+
+[[example]]
+name = "main_machine_modes"
+path = "examples/rust/main_machine_modes.rs"
+
+[[example]]
+name = "planner_stages"
+path = "examples/rust/planner_stages.rs"
+
+[[example]]
+name = "potato_unload"
+path = "examples/rust/potato_unload/main.rs"
+required-features = ["geojson"]
+
+[[example]]
+name = "random_heads"
+path = "examples/rust/random_heads.rs"
+
+[[example]]
+name = "sharp_heads"
+path = "examples/rust/sharp_heads.rs"
+
+[[example]]
+name = "single_machine_csv"
+path = "examples/rust/single_machine_csv.rs"
+
+[[example]]
+name = "traversal"
+path = "examples/rust/traversal.rs"
+
+[[example]]
+name = "turn_radius_no_reverse"
+path = "examples/rust/turn_radius_no_reverse.rs"
+
+[[example]]
+name = "turn_radius_reverse"
+path = "examples/rust/turn_radius_reverse.rs"

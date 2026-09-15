@@ -6,7 +6,10 @@ use concord::{Wgs, to_wgs_from_enu};
 use maptrax::{
     Geo, Point, Point2Ext, Polygon, Pose2D, Swath, SwathType, point_xy, polygon_exterior_points,
 };
-use rerun::{Color, GeoLineStrings, LineStrips2D, RecordingStream, RecordingStreamBuilder};
+use rerun::{
+    Color, GeoLineStrings, LineStrips2D, LineStrips3D, Points3D, RecordingStream,
+    RecordingStreamBuilder,
+};
 
 pub fn connect(app_id: &str) -> Result<RecordingStream, Box<dyn Error>> {
     let url = std::env::var("RERUN_URL")
@@ -368,4 +371,132 @@ fn scale_color(color: (u8, u8, u8), factor: f32) -> Color {
         (color.1 as f32 * factor).round().clamp(0.0, 255.0) as u8,
         (color.2 as f32 * factor).round().clamp(0.0, 255.0) as u8,
     )
+}
+
+// --------------------------------------------------------------------- 3D
+//
+// Local-ENU geometry laid flat on z = 0, matching how the sibling crates
+// (zoneout, ondrive) draw fields and machines.
+
+pub fn log_polygon_3d(
+    rec: &RecordingStream,
+    path: &str,
+    polygon: &Polygon,
+    color: Color,
+    radius: f32,
+) -> Result<(), Box<dyn Error>> {
+    let strip = close_3d(points3(&polygon_exterior_points(polygon)));
+    rec.log(
+        path,
+        &LineStrips3D::new([strip])
+            .with_colors([color])
+            .with_radii([radius]),
+    )?;
+    Ok(())
+}
+
+pub fn log_polylines_3d(
+    rec: &RecordingStream,
+    path: &str,
+    polylines: &[Vec<Point>],
+    color: (u8, u8, u8),
+    radius: f32,
+) -> Result<(), Box<dyn Error>> {
+    let strips: Vec<Vec<[f32; 3]>> = polylines
+        .iter()
+        .filter(|line| line.len() >= 2)
+        .map(|line| points3(line))
+        .collect();
+    if strips.is_empty() {
+        return Ok(());
+    }
+    let color = Color::from_rgb(color.0, color.1, color.2);
+    let colors: Vec<Color> = strips.iter().map(|_| color).collect();
+    let radii: Vec<f32> = strips.iter().map(|_| radius).collect();
+    rec.log(
+        path,
+        &LineStrips3D::new(strips)
+            .with_colors(colors)
+            .with_radii(radii),
+    )?;
+    Ok(())
+}
+
+pub fn log_points_3d(
+    rec: &RecordingStream,
+    path: &str,
+    points: &[Point],
+    color: Color,
+    radius: f32,
+) -> Result<(), Box<dyn Error>> {
+    let positions = points3(points);
+    let colors: Vec<Color> = positions.iter().map(|_| color).collect();
+    let radii: Vec<f32> = positions.iter().map(|_| radius).collect();
+    rec.log(
+        path,
+        &Points3D::new(positions)
+            .with_colors(colors)
+            .with_radii(radii),
+    )?;
+    Ok(())
+}
+
+/// A machine as a footprint plus a nose arrow, so heading reads at a glance.
+pub fn log_machine_3d(
+    rec: &RecordingStream,
+    path: &str,
+    pose: Pose2D,
+    color: Color,
+    length: f64,
+    width: f64,
+) -> Result<(), Box<dyn Error>> {
+    let (cos, sin) = (pose.yaw.cos(), pose.yaw.sin());
+    let (cx, cy) = (pose.point.x(), pose.point.y());
+    let place = |lx: f64, ly: f64| {
+        [
+            (cx + cos * lx - sin * ly) as f32,
+            (cy + sin * lx + cos * ly) as f32,
+            0.0f32,
+        ]
+    };
+
+    let (half_l, half_w) = (length * 0.5, width * 0.5);
+    let body = vec![
+        place(half_l, half_w),
+        place(half_l, -half_w),
+        place(-half_l, -half_w),
+        place(-half_l, half_w),
+        place(half_l, half_w),
+    ];
+    rec.log(
+        format!("{path}/body"),
+        &LineStrips3D::new([body])
+            .with_colors([color])
+            .with_radii([(width * 0.06) as f32]),
+    )?;
+
+    let nose = vec![place(half_l, 0.0), place(half_l + length * 0.5, 0.0)];
+    rec.log(
+        format!("{path}/heading"),
+        &LineStrips3D::new([nose])
+            .with_colors([color])
+            .with_radii([(width * 0.08) as f32]),
+    )?;
+    Ok(())
+}
+
+fn points3(points: &[Point]) -> Vec<[f32; 3]> {
+    points
+        .iter()
+        .map(|p| [p.x() as f32, p.y() as f32, 0.0f32])
+        .collect()
+}
+
+fn close_3d(mut points: Vec<[f32; 3]>) -> Vec<[f32; 3]> {
+    if let Some(first) = points.first().copied()
+        && points.last().copied() != Some(first)
+    {
+        points.push(first);
+    }
+    points
 }

@@ -78,7 +78,22 @@
           zlib
         ];
 
-        pythonEnv = pkgs.python3.withPackages (ps: with ps; [ fonttools brotli pip ]);
+        pythonEnv = pkgs.python3.withPackages (ps: with ps; [
+          fonttools
+          brotli
+          pip
+          # Shapefile / geodata handling, for inspecting and converting the
+          # field files customers send (see xtra/).
+          pyshp
+          shapely
+          pyproj
+          fiona
+          geopandas
+          matplotlib
+          # Viewer client for the examples/python_binding scripts; version
+          # tracks the `rerun` crate in Cargo.toml.
+          rerun-sdk
+        ]);
       in
       {
         devShells.default = pkgs.mkShell {
@@ -93,6 +108,8 @@
             pkgs.rust-cbindgen
             pkgs.trunk
             pkgs.maturin
+            # ogrinfo / ogr2ogr for reading shapefiles from the command line.
+            pkgs.gdal
             pythonEnv
 
             nixGLAlias
@@ -112,6 +129,8 @@
           # Pin the interpreter pyo3's build script probes, so the version it
           # links matches the one on LD_LIBRARY_PATH.
           PYO3_PYTHON = "${pythonEnv}/bin/python3";
+          # Consumed by .envrc to put this interpreter first on PATH.
+          PYTHON = "${pythonEnv}/bin/python3";
           WGPU_VALIDATION = "0";
           WGPU_DEBUG = "0";
         };

@@ -1,9 +1,9 @@
 use crate::Geo;
 
 use crate::core::{
-    Aabb, MaptraxError, Point, Point2Ext, Polygon, Result, Segment, aabb_from_points, aabb_height,
-    aabb_width, next_id, point_distance, point_xy, points_equal, polygon_aabb, polygon_area,
-    polygon_ensure_ccw, polygon_from_points, polygon_is_axis_aligned_rectangle,
+    Aabb, MaptraxError, Point, Point2Ext, Polygon, Result, Segment, aabb_center, aabb_from_points,
+    aabb_height, aabb_width, next_id, point_distance, point_xy, points_equal, polygon_aabb,
+    polygon_area, polygon_ensure_ccw, polygon_from_points, polygon_is_axis_aligned_rectangle,
     polygon_open_vertices, polygon_shrink, remove_colinear_points, segment_end, segment_length,
     segment_new, segment_start,
 };
@@ -84,6 +84,50 @@ pub struct Part {
     /// ring on this shared line, then offsets deeper rings normally so there
     /// is no empty seam and no multi-ring collapse.
     pub non_owned_splits: Vec<SplitBoundary>,
+}
+
+impl Part {
+    /// Mark one work swath finished (harvested) or unfinished. Returns false
+    /// when no work swath carries `swath_id`.
+    pub fn set_swath_finished(&mut self, swath_id: i32, finished: bool) -> bool {
+        for swath in &mut self.swaths {
+            if swath.id == swath_id && swath.r#type == SwathType::Swath {
+                swath.finished = finished;
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn set_all_swaths_finished(&mut self, finished: bool) {
+        for swath in &mut self.swaths {
+            if swath.r#type == SwathType::Swath {
+                swath.finished = finished;
+            }
+        }
+    }
+
+    pub fn work_swaths(&self) -> impl Iterator<Item = &Swath> {
+        self.swaths
+            .iter()
+            .filter(|swath| swath.r#type == SwathType::Swath)
+    }
+
+    pub fn finished_swaths(&self) -> impl Iterator<Item = &Swath> {
+        self.work_swaths().filter(|swath| swath.finished)
+    }
+
+    pub fn remaining_swaths(&self) -> impl Iterator<Item = &Swath> {
+        self.work_swaths().filter(|swath| !swath.finished)
+    }
+
+    pub fn finished_swath_count(&self) -> usize {
+        self.finished_swaths().count()
+    }
+
+    pub fn remaining_swath_count(&self) -> usize {
+        self.remaining_swaths().count()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -314,6 +358,77 @@ impl Field {
         }
 
         Ok(())
+    }
+
+    /// Lay out rows parallel to a surveyed AB line instead of searching for an
+    /// angle. `seed` is the centreline of one row; the rest are stepped off it
+    /// by `swath_width` in both directions. Use this wherever the rows are
+    /// already in the ground — potato ridges, tree lines, seed beds.
+    pub fn generate_swaths_from_line(&mut self, swath_width: f64, seed: Segment) -> Result<()> {
+        if swath_width <= 0.0 {
+            return Err(MaptraxError::InvalidPolygon("swath width must be positive"));
+        }
+        if segment_length(seed) < 1e-9 {
+            return Err(MaptraxError::InvalidPolygon(
+                "AB line needs two distinct points",
+            ));
+        }
+
+        for part in &mut self.parts {
+            let interior = part
+                .headlands
+                .last()
+                .map(|ring| &ring.polygon)
+                .unwrap_or(&part.boundary.polygon);
+            part.swaths = generate_swaths_from_line_for_polygon(swath_width, seed, interior);
+        }
+
+        Ok(())
+    }
+
+    /// Inset headland rings by an explicit distance rather than by the working
+    /// width. Headland depth is a property of the field, not of the implement:
+    /// a 3 m turn lane and a 1.5 m harvester are independent numbers.
+    pub fn generate_headlands_with_width(
+        &mut self,
+        headland_width: f64,
+        headland_count: usize,
+    ) -> Result<()> {
+        self.generate_headlands(headland_width, headland_count)
+    }
+
+    /// Headlands inset by `headland_width`, then rows stepped off `seed`.
+    pub fn gen_field_from_line(
+        &mut self,
+        swath_width: f64,
+        seed: Segment,
+        headland_width: f64,
+        headland_count: usize,
+    ) -> Result<()> {
+        self.generate_headlands_with_width(headland_width, headland_count)?;
+        self.generate_swaths_from_line(swath_width, seed)
+    }
+
+    /// Mark one work swath in `part_index` finished (harvested) or unfinished.
+    pub fn set_swath_finished(
+        &mut self,
+        part_index: usize,
+        swath_id: i32,
+        finished: bool,
+    ) -> Result<bool> {
+        let part = self
+            .parts
+            .get_mut(part_index)
+            .ok_or(MaptraxError::MissingPart(part_index))?;
+        Ok(part.set_swath_finished(swath_id, finished))
+    }
+
+    pub fn finished_swath_count(&self) -> usize {
+        self.parts.iter().map(Part::finished_swath_count).sum()
+    }
+
+    pub fn remaining_swath_count(&self) -> usize {
+        self.parts.iter().map(Part::remaining_swath_count).sum()
     }
 
     pub fn generate_swaths_with_objective(
@@ -561,6 +676,102 @@ pub fn generate_swaths_for_polygon(
             swath_id += 1;
         }
         offset += swath_width;
+    }
+
+    swaths
+}
+
+/// Guards against a near-zero width over a large field producing an
+/// unbounded row count.
+const MAX_SWATHS_FROM_LINE: f64 = 100_000.0;
+
+/// Rows parallel to `seed`, spaced `swath_width` apart, clipped to `polygon`.
+///
+/// `seed` is the centreline of one row — a surveyed AB line. Rows are stepped
+/// off it in both perpendicular directions until the polygon is covered, so
+/// the row grid is anchored to the line rather than to the polygon centroid.
+/// Row direction follows the seed, so every generated row runs the same way
+/// the operator drove the original.
+pub fn generate_swaths_from_line_for_polygon(
+    swath_width: f64,
+    seed: Segment,
+    polygon: &Polygon,
+) -> Vec<Swath> {
+    if swath_width <= 0.0 {
+        return Vec::new();
+    }
+
+    let vertices = polygon_open_vertices(polygon);
+    if vertices.len() < 3 {
+        return Vec::new();
+    }
+
+    let Some(bb) = polygon_aabb(polygon) else {
+        return Vec::new();
+    };
+
+    let anchor = segment_start(seed);
+    let tip = segment_end(seed);
+    let (mut dx, mut dy) = (tip.x() - anchor.x(), tip.y() - anchor.y());
+    let seed_len = (dx * dx + dy * dy).sqrt();
+    if seed_len < 1e-9 {
+        return Vec::new();
+    }
+    dx /= seed_len;
+    dy /= seed_len;
+    let (nx, ny) = (-dy, dx);
+
+    let mut min_offset = f64::INFINITY;
+    let mut max_offset = f64::NEG_INFINITY;
+    for vertex in &vertices {
+        let offset = (vertex.x() - anchor.x()) * nx + (vertex.y() - anchor.y()) * ny;
+        min_offset = min_offset.min(offset);
+        max_offset = max_offset.max(offset);
+    }
+    if !min_offset.is_finite() || !max_offset.is_finite() {
+        return Vec::new();
+    }
+
+    let centre = aabb_center(bb);
+    let diagonal = aabb_width(bb).hypot(aabb_height(bb));
+    let reach = diagonal + point_distance(anchor, centre) + swath_width;
+
+    let first = (min_offset / swath_width).floor();
+    let last = (max_offset / swath_width).ceil();
+    if !first.is_finite() || !last.is_finite() || last - first > MAX_SWATHS_FROM_LINE {
+        return Vec::new();
+    }
+
+    let tangent = (dx, dy);
+    let mut swaths = Vec::new();
+    let mut swath_id: i32 = 0;
+    let mut step = first;
+    while step <= last {
+        let offset = step * swath_width;
+        let cx = anchor.x() + nx * offset;
+        let cy = anchor.y() + ny * offset;
+        let ray = segment_new(
+            point_xy(cx - dx * reach, cy - dy * reach),
+            point_xy(cx + dx * reach, cy + dy * reach),
+        );
+
+        for seg in clip_segment_to_polygon(ray, polygon) {
+            let start = segment_start(seg);
+            let end = segment_end(seg);
+            if point_distance(start, end) < swath_width * 0.1 || points_equal(start, end, 1e-6) {
+                continue;
+            }
+            swaths.push(create_indexed_swath(
+                start,
+                end,
+                SwathType::Swath,
+                swath_id,
+                swath_width,
+                tangent,
+            ));
+            swath_id += 1;
+        }
+        step += 1.0;
     }
 
     swaths

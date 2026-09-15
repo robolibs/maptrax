@@ -50,6 +50,7 @@ pub use field::{
     DecompositionMode, Field, Part, Ring, SplitBoundary, Swath, SwathAngleSearchOptions,
     SwathAngleSearchResult, SwathObjective, SwathType, create_ring, create_swath,
     generate_headlands_for_polygon, generate_swaths_for_polygon,
+    generate_swaths_from_line_for_polygon,
 };
 pub use net::{ABLine, Nety, RoutingOptions, RoutingStrategy};
 pub use tour::{
