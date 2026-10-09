@@ -135,7 +135,7 @@ The Python example makefile uses `PYO3_PYTHON` from the flake shell, creates a l
 ## GeoJSON Export
 
 Behind the optional `geojson` feature, plans are written as GeoJSON through the
-sibling [`vectory`](https://codeberg.org/robolibs/vectory) crate. Maptrax plans
+sibling [`vectory`](https://github.com/robolibs/vectory) crate. Maptrax plans
 in local ENU metres; `vectory` handles the encoding and the ENU to WGS84
 conversion through the field datum.
 
