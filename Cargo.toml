@@ -28,10 +28,10 @@ path = "examples/rust/geojson_export.rs"
 required-features = ["geojson"]
 
 [dependencies]
-datapod = { git = "https://codeberg.org/robolibs/datapod.git", tag = "0.4.1" }
-concord = { git = "https://codeberg.org/robolibs/concord.git", tag = "0.1.2" }
-graphix = { git = "https://codeberg.org/robolibs/graphix.git", tag = "0.1.2" }
-vectory = { git = "https://codeberg.org/robolibs/vectory.git", tag = "0.1.2", optional = true }
+datapod = { git = "https://github.com/robolibs/datapod", tag = "0.6.2" }
+concord = { git = "https://github.com/robolibs/concord", tag = "v0.1.6" }
+graphix = { git = "https://github.com/robolibs/graphix", tag = "v0.1.6" }
+vectory = { git = "https://github.com/robolibs/vectory", tag = "v0.1.3", optional = true }
 pyo3 = { version = "0.23", optional = true, features = ["abi3-py39"] }
 
 [dev-dependencies]
